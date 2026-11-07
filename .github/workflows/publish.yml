@@ -41,14 +41,19 @@ jobs:
           npm pack --pack-destination dist
           tar -tzf dist/*.tgz > files.txt
           ! grep -E '(^|/)(\.env|\.npmrc|id_rsa|credentials\.json|\.dsh)(/|$)' files.txt
+          grep -q '^package/README\.md$' files.txt
+          grep -q '^package/LICENSE$' files.txt
+          grep -q '^package/bin/flake-ledger\.mjs$' files.txt
+          ! grep -E '^package/(test|\.github)/' files.txt
           node -e "const p=require('./package.json'); if(!p.name||!p.version||!p.license) process.exit(1)"
       - name: install the tarball in a clean directory
         run: |
           set -euo pipefail
           mkdir -p smoke && cd smoke
-          npm init -y >/dev/null
-          npm install ../dist/*.tgz
-          node -e "const p=require('../package.json'); const bin=Object.values(p.bin||{})[0]; if(!bin) process.exit(0); require('child_process').execFileSync(process.execPath, ['../'+bin, '--version'], {stdio:'inherit'})"
+          npm init --yes > /dev/null
+          npm install --no-audit --no-fund ../dist/*.tgz
+          node node_modules/flake-ledger/bin/flake-ledger.mjs --version
+          node node_modules/flake-ledger/bin/flake-ledger.mjs --help > /dev/null
       - uses: actions/upload-artifact@v4
         with:
           name: tarball

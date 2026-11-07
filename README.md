@@ -1,36 +1,158 @@
 # flake-ledger
 
+[![CI](https://github.com/WJDdidi-1/flake-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/WJDdidi-1/flake-ledger/actions/workflows/ci.yml)
+
 Ranks flaky tests from JUnit XML across CI runs, including passed-on-retry.
+
+Retries turn a red run green, so the same test burns CI time indefinitely; each
+run's JUnit XML is inspected alone and the passed-on-retry evidence is
+discarded. `flake-ledger` reads every JUnit XML under a directory, groups shards
+into CI runs, and keeps each attempt. A test that failed and then passed on
+retry stays a `passed-on-retry` row in the ledger instead of disappearing into a
+green build.
+
+## A real session
+
+The example below is five CI runs, one JUnit report per run:
+
+```text
+/tmp/flake-ledger-example/runs/
+  run-01/results.xml
+  run-02/results.xml
+  run-03/results.xml
+  run-04/results.xml
+  run-05/results.xml
+```
+
+`run-01/results.xml` (other testcases trimmed) carries Surefire's
+passed-on-retry evidence:
+
+```xml
+<testsuite name="com.example.CheckoutTest" timestamp="2026-01-05T10:00:00">
+  <testcase classname="com.example.CheckoutTest" name="appliesCoupon">
+    <flakyFailure message="expected 10% discount, got 0">
+      <stackTrace>org.opentest4j.AssertionFailedError: expected 10% discount, got 0
+  at CheckoutTest.appliesCoupon(CheckoutTest.java:42)</stackTrace>
+    </flakyFailure>
+  </testcase>
+  <!-- more testcases -->
+</testsuite>
+```
+
+Scan the tree. The table is ranked by a 95% Wilson lower bound on unstable
+rate, so a test with more evidence outranks one with a single bad run:
+
+```console
+$ flake-ledger scan /tmp/flake-ledger-example/runs
+TEST ID                                     RUNS  ATTEMPTS  UNSTABLE  PASS-ON-RETRY  FAILED  RATE   SCORE  CLASS
+com.example.LoginTest::rejectsExpiredToken  5     5         2         0              2       40.0%  0.118  cross-run flake
+com.example.SearchTest::filtersByPrice      5     5         2         0              2       40.0%  0.118  cross-run flake
+com.example.CheckoutTest::appliesCoupon     5     7         2         2              0       40.0%  0.118  passed-on-retry
+com.example.CartTest::addsItem              5     5         0         0              0       0.0%   0.000  stable
+com.example.ReportTest::exportsCsv          5     5         0         0              0       0.0%   0.000  skipped
+
+5 runs, 5 tests, 27 attempts, 5 XML files.
+```
+
+`appliesCoupon` has five runs but seven attempts and two passed-on-retry runs:
+the two red attempts are not lost. `explain` prints the timeline that produced
+the score:
+
+```console
+$ flake-ledger explain /tmp/flake-ledger-example/runs 'com.example.CheckoutTest::appliesCoupon'
+com.example.CheckoutTest::appliesCoupon
+  classification: passed-on-retry
+  runs: 5  attempts: 7  unstable: 2/5  rate: 40.0%  score: 0.118
+
+  run run-01  passed-on-retry  2 attempts
+    /tmp/flake-ledger-example/runs/run-01
+    #1 failed  /tmp/flake-ledger-example/runs/run-01/results.xml
+         expected 10% discount, got 0
+    #2 passed  /tmp/flake-ledger-example/runs/run-01/results.xml (retried)
+
+  run run-02  passed  1 attempt
+    /tmp/flake-ledger-example/runs/run-02
+    #1 passed  /tmp/flake-ledger-example/runs/run-02/results.xml
+
+  run run-03  passed-on-retry  2 attempts
+    /tmp/flake-ledger-example/runs/run-03
+    #1 failed  /tmp/flake-ledger-example/runs/run-03/results.xml
+         expected 10% discount, got 0
+    #2 passed  /tmp/flake-ledger-example/runs/run-03/results.xml (retried)
+
+  run run-04  passed  1 attempt
+    /tmp/flake-ledger-example/runs/run-04
+    #1 passed  /tmp/flake-ledger-example/runs/run-04/results.xml
+
+  run run-05  passed  1 attempt
+    /tmp/flake-ledger-example/runs/run-05
+    #1 passed  /tmp/flake-ledger-example/runs/run-05/results.xml
+```
+
+Use the ledger as a CI gate and write the quarantine list. The table on stdout
+is the same one shown above, so it is omitted here:
+
+```console
+$ flake-ledger scan /tmp/flake-ledger-example/runs --quarantine flaky.txt --fail-on 0.2 --min-runs 5 > /dev/null
+wrote 3 flaky test ids to /tmp/flake-ledger-example/flaky.txt
+flaky: com.example.LoginTest::rejectsExpiredToken unstable in 2/5 runs (40.0%) >= 20.0%
+flaky: com.example.SearchTest::filtersByPrice unstable in 2/5 runs (40.0%) >= 20.0%
+flaky: com.example.CheckoutTest::appliesCoupon unstable in 2/5 runs (40.0%) >= 20.0%
+flake-ledger: 3 flaky tests crossed --fail-on 0.2
+$ echo $?
+1
+$ cat flaky.txt
+com.example.LoginTest::rejectsExpiredToken
+com.example.SearchTest::filtersByPrice
+com.example.CheckoutTest::appliesCoupon
+```
+
+`--fail-on` and `--min-runs` are opt-in; without them the command is
+report-only and exits 0.
 
 ## Who it is for
 
-Maintainers of multi-runner CI suites (pytest, Playwright, xUnit, cargo-nextest, Surefire) whose jobs keep going green only after a retry.
-
-## The problem
-
-Retries turn a red run green, so the same test burns CI time indefinitely; each run's JUnit XML is inspected alone and the passed-on-retry evidence is discarded.
+Maintainers of multi-runner CI suites (pytest, Playwright, xUnit,
+cargo-nextest, Surefire) whose jobs keep going green only after a retry.
 
 ## Why not the obvious answer
 
-pytest-rerunfailures, Playwright retries, and --rerun-failed only mask the failure; BuildPulse, Trunk, and Datadog CI Visibility are paid hosted dashboards; GitHub's flaky-test detection is confined to Actions. None offers a free, offline, cross-runner ledger plus a quarantine file.
+pytest-rerunfailures, Playwright retries, and `--rerun-failed` only mask the
+failure; BuildPulse, Trunk, and Datadog CI Visibility are paid hosted
+dashboards; GitHub's flaky-test detection is confined to Actions. None offers a
+free, offline, cross-runner ledger plus a quarantine file.
 
 ## Install
 
+From npm:
+
 ```sh
-npm install -g flake-ledger
+npm install --global flake-ledger
+flake-ledger --version
 ```
 
-Requires Node.js 18 or newer. There are no runtime dependencies.
+From a checkout:
+
+```sh
+git clone https://github.com/WJDdidi-1/flake-ledger.git
+cd flake-ledger
+npm install --global .
+flake-ledger --version
+```
+
+Requires Node.js 18 or newer. There are no runtime dependencies, and the
+published package contains only the runtime (`bin/`, `lib/`) plus package
+metadata, `README.md`, and `LICENSE`.
 
 ## Use
 
-Point the scanner at a directory of JUnit XML. It reads recursively and prints a table ranked by the 95% Wilson lower bound on unstable rate:
+Point the scanner at a directory of JUnit XML. It reads recursively:
 
 ```sh
 flake-ledger scan path/to/runs
 ```
 
-Machine-readable output and the top 10 only:
+Machine-readable output, top 10 only:
 
 ```sh
 flake-ledger scan path/to/runs --json --top 10
@@ -43,17 +165,37 @@ flake-ledger explain path/to/runs 'com.example.FooTest::eventuallyGreen'
 flake-ledger explain path/to/runs 'com.example.FooTest::eventuallyGreen' --json
 ```
 
-Write the ids of flaky tests to a quarantine file, and fail CI when a flaky test crosses a threshold and has been seen in at least five runs:
+Write the ids of flaky tests to a quarantine file, and fail CI when a flaky
+test crosses a threshold and has at least five eligible (non-skipped) runs:
 
 ```sh
 flake-ledger scan path/to/runs --quarantine flaky.txt --fail-on 0.5 --min-runs 5
 ```
 
-Exit codes: `0` for a successful report or a scan under `--fail-on`, `1` when `--fail-on` is crossed, and `2` for a usage or scan error. `--fail-on` and `--min-runs` are opt-in; the default is report-only.
+`--fail-on` accepts a fraction (`0.5`), a percentage (`50%`), or a whole
+percentage (`50`). Exit codes:
+
+- `0` — report written, or no flaky test crossed `--fail-on`.
+- `1` — a flaky test crossed `--fail-on`, or `explain` matched no test or more
+  than one test.
+- `2` — usage error, unreadable runs directory, or a quarantine file that
+  could not be written.
+
+### Scan options
+
+| Option | Meaning |
+| --- | --- |
+| `--json`, `-j` | Print JSON instead of the terminal table. |
+| `--top N` | Show only the N highest-ranked tests (totals still count every test). |
+| `--quarantine <file>` | Write the ids of flaky tests, one per line. |
+| `--fail-on <rate>` | Exit 1 when a flaky test's unstable rate is at or above `<rate>`. |
+| `--min-runs <n>` | With `--fail-on`, ignore tests with fewer than `n` eligible runs. |
+| `--group-by <mode>` | `auto` (default), `file`, or `parent`; controls what counts as one run. |
 
 ## Input layout
 
-The first directory below `<runs-dir>` is one CI run, so every XML file inside it is a shard of that run:
+The first directory below `<runs-dir>` is one CI run, so every XML file inside
+it is a shard of that run:
 
 ```text
 runs/
@@ -62,27 +204,70 @@ runs/
   run-2/results.xml
 ```
 
-XML files placed directly under `<runs-dir>` are separate runs unless their names carry a shard marker (`shard-1.xml`, `run-3-part-2.xml`). Top-level shard-named run directories (`run-3-shard-1/`, `run-3-shard-2/`) merge into one run as well. Use `--group-by file` to make every XML document its own run, or `--group-by parent` to group by immediate directory.
+XML files placed directly under `<runs-dir>` are separate runs unless their
+names carry a shard marker (`shard-1.xml`, `run-3-part-2.xml`). Top-level
+shard-named run directories (`run-3-shard-1/`, `run-3-shard-2/`) merge into one
+run as well. Use `--group-by file` to make every XML document its own run, or
+`--group-by parent` to group by immediate directory.
 
-## What the MVP does
+Supported inputs are Surefire and compatible JUnit XML, including
+`<failure>`, `<error>`, `<skipped>`, `<flakyFailure>`, `<flakyError>`,
+`<rerunFailure>`, `<rerunError>`, `retry`/`retries`/`rerun`/`rerunCount`
+attributes, and repeated `<testcase>` elements for the same test. A malformed
+XML file produces a warning and does not hide healthy files.
 
-- `scan <runs-dir>` recursively parses every JUnit XML, merges sharded files, and collapses repeated attempts into one record per `classname::name`.
-- Classifies each record:
-  - `stable`: every eligible run passed without retry evidence.
-  - `passed-on-retry`: a run ended green only after a retry (Surefire `flakyFailure`/`flakyError`, retry attributes such as `retry`/`retries`/`rerun`/`rerunCount`, repeated testcases, or an explicit pass after `rerunFailure`).
-  - `cross-run flake`: the test both passed and failed across runs.
-  - `always-failing`: no run passed and at least one run failed.
-  - `failed-on-retry`: a run ended red after at least one retry.
-  - `skipped`: every run skipped the test.
-- Prints a terminal table ranked by a 95% Wilson lower bound on unstable rate, with `--json` and `--top N` for machines.
-- `--quarantine <file>` writes flaky-only test ids; `explain <runs-dir> <id>` prints the per-run timeline with file paths and failure messages.
-- `--fail-on <rate> --min-runs <n>` makes CI exit 1 when a flaky test crosses the threshold, while the default stays report-only.
+## What it reports
 
-The JSON output contains `totals`, `runs`, `warnings`, and one `tests` record per test (limited to the first N by `--top`) with its `attempts`, `unstableRuns`, `eligibleRuns`, `unstableRate`, Wilson `score`, `classification`, and `timeline`.
+`scan` collapses all of those attempts into one record per `classname::name`
+and classifies it:
+
+| Classification | Meaning |
+| --- | --- |
+| `stable` | Every eligible run passed without retry evidence. |
+| `passed-on-retry` | A run ended green only after a retry. |
+| `cross-run flake` | The test both passed and failed across runs. |
+| `always-failing` | No run passed and at least one run failed. |
+| `failed-on-retry` | A run ended red after at least one retry. |
+| `skipped` | Every run skipped the test. |
+
+Flaky classifications are `passed-on-retry`, `cross-run flake`, and
+`failed-on-retry`; those are the records written by `--quarantine` and checked
+by `--fail-on`.
+
+The JSON output contains `totals`, `runs`, `warnings`, and one `tests` record
+per test (limited to the first N by `--top`) with its `attempts`,
+`unstableRuns`, `eligibleRuns`, `unstableRate`, Wilson `score`,
+`classification`, and `timeline`.
+
+## Use it in CI
+
+Collect one directory per CI run (artifact names become run ids), download the
+reports, and gate on the ledger:
+
+```yaml
+- uses: actions/download-artifact@v4
+  with:
+    path: runs
+- run: npm install --global flake-ledger
+- run: flake-ledger scan runs --fail-on 0.3 --min-runs 10 --quarantine flaky.txt
+```
+
+The command fails only when a flaky classification crosses the threshold. Keep
+the `flaky.txt` artifact or commit it if your test runner supports reading a
+quarantine list.
 
 ## How we know it works
 
-`npm test` builds temporary JUnit fixtures and exercises every MVP feature above through the CLI: recursive scanning, shard merging, repeated testcases, Surefire `flakyFailure`/`rerunFailure`, retry attributes, all classifications, Wilson-bound table ordering, `--json`, `--top`, `--quarantine`, `explain`, and `--fail-on`/`--min-runs`.
+`npm test` builds temporary JUnit fixtures and exercises every feature above
+through the CLI: recursive scanning, shard merging, repeated testcases,
+Surefire `flakyFailure`/`rerunFailure`, retry attributes, all classifications,
+Wilson-bound table ordering, `--json`, `--top`, `--quarantine`, `explain`, and
+`--fail-on`/`--min-runs`.
+
+CI runs the suite on Ubuntu, macOS (Intel), and Windows for Node.js 18, 20, 22,
+and 24. Each job also packs the tarball, installs it into a clean directory,
+and runs the installed binary, so the published package is tested rather than
+just the checkout.
 
 From a checkout, the same commands run against the local entry point:
 
@@ -93,8 +278,9 @@ node bin/flake-ledger.mjs scan path/to/runs
 
 ## Status
 
-Early MVP. The features above are the scope; anything not listed is not built yet.
+Early MVP. The features above are the scope; anything not listed is not built
+yet.
 
-## Licence
+## License
 
-Apache-2.0.
+Apache-2.0. See [LICENSE](LICENSE).
