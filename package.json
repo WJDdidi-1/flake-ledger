@@ -4,6 +4,7 @@
   "description": "Ranks flaky tests from JUnit XML across CI runs, including passed-on-retry.",
   "license": "Apache-2.0",
   "type": "module",
+  "main": "./lib/index.mjs",
   "bin": {
     "flake-ledger": "./bin/flake-ledger.mjs"
   },
