@@ -405,3 +405,210 @@ test('scan of a missing runs directory fails clearly', (t) => {
   assert.equal(result.status, 2);
   assert.match(result.stderr, /cannot read runs directory/);
 });
+
+test('scan classifies cross-run flake, passed-on-retry, always-failing, and stable', (t) => {
+  const { runs } = fixture(t);
+  writeFile(
+    runs,
+    'run-1/results.xml',
+    junit(
+      [
+        testcase('pkg.MatrixTest', 'stable'),
+        testcase('pkg.MatrixTest', 'alwaysRed', '<failure message="red"/>'),
+        testcase('pkg.MatrixTest', 'crossRun', '<failure message="red once"/>'),
+        testcase('pkg.MatrixTest', 'retryAttribute', '<failure message="earlier"/>'),
+        '    <testcase classname="pkg.MatrixTest" name="retriesAttribute" retries="2"/>',
+        testcase('pkg.MatrixTest', 'repeated', '<failure message="earlier"/>'),
+        testcase('pkg.MatrixTest', 'repeated'),
+      ].join('\n'),
+    ),
+  );
+  writeFile(
+    runs,
+    'run-2/results.xml',
+    junit(
+      [
+        testcase('pkg.MatrixTest', 'stable'),
+        testcase('pkg.MatrixTest', 'alwaysRed', '<failure message="red again"/>'),
+        testcase('pkg.MatrixTest', 'crossRun'),
+        testcase('pkg.MatrixTest', 'retriesAttribute'),
+        testcase('pkg.MatrixTest', 'repeated'),
+      ].join('\n'),
+    ),
+  );
+
+  const result = scanJson(runs);
+  assert.equal(byId(result, 'pkg.MatrixTest::stable').classification, 'stable');
+  assert.equal(byId(result, 'pkg.MatrixTest::alwaysRed').classification, 'always-failing');
+  assert.equal(byId(result, 'pkg.MatrixTest::crossRun').classification, 'cross-run flake');
+  assert.equal(byId(result, 'pkg.MatrixTest::retriesAttribute').classification, 'passed-on-retry');
+  assert.equal(byId(result, 'pkg.MatrixTest::repeated').classification, 'passed-on-retry');
+  assert.equal(byId(result, 'pkg.MatrixTest::retryAttribute').classification, 'always-failing');
+});
+
+test('rerun aliases and an explicit pass after rerunFailure count as passed-on-retry', (t) => {
+  const { runs } = fixture(t);
+  writeFile(
+    runs,
+    'run-1/results.xml',
+    junit(
+      [
+        '    <testcase classname="pkg.RetryTest" name="retries" retries="2"/>',
+        '    <testcase classname="pkg.RetryTest" name="rerun" rerun="1"/>',
+        '    <testcase classname="pkg.RetryTest" name="declaredPass" status="passed">' +
+          '<rerunFailure message="first attempt" type="AssertionError"/></testcase>',
+      ].join('\n'),
+    ),
+  );
+
+  const result = scanJson(runs);
+  for (const name of ['retries', 'rerun', 'declaredPass']) {
+    const record = byId(result, `pkg.RetryTest::${name}`);
+    assert.equal(record.classification, 'passed-on-retry', name);
+    assert.equal(record.passedOnRetryRuns, 1, name);
+  }
+
+  const declaredPass = byId(result, 'pkg.RetryTest::declaredPass');
+  assert.equal(declaredPass.attempts, 2);
+  assert.deepEqual(
+    declaredPass.timeline[0].attempts.map((attempt) => attempt.status),
+    ['failed', 'passed'],
+  );
+  assert.equal(declaredPass.timeline[0].attempts[0].message, 'first attempt');
+  assert.equal(declaredPass.timeline[0].attempts[1].retried, true);
+});
+
+test('terminal table is ranked by the Wilson lower bound, not the raw rate', (t) => {
+  const { runs } = fixture(t);
+  for (let run = 1; run <= 10; run += 1) {
+    const body = [];
+    body.push(
+      run <= 5
+        ? testcase('pkg.WilsonTest', 'moreEvidence', '<failure/>')
+        : testcase('pkg.WilsonTest', 'moreEvidence'),
+    );
+    if (run === 1) body.push(testcase('pkg.WilsonTest', 'lessEvidence', '<failure/>'));
+    if (run === 2) body.push(testcase('pkg.WilsonTest', 'lessEvidence'));
+    writeFile(runs, `run-${String(run).padStart(2, '0')}/results.xml`, junit(body.join('\n')));
+  }
+
+  const json = scanJson(runs);
+  const more = byId(json, 'pkg.WilsonTest::moreEvidence');
+  const less = byId(json, 'pkg.WilsonTest::lessEvidence');
+  assert.equal(more.unstableRate, 0.5);
+  assert.equal(less.unstableRate, 0.5);
+  assert.ok(more.score > less.score, `${more.score} should beat ${less.score}`);
+  assert.ok(more.score > 0 && more.score < 1);
+
+  const text = runCli(['scan', runs]);
+  assert.equal(text.status, 0, text.stderr);
+  const lines = text.stdout.trim().split('\n');
+  assert.match(lines[0], /SCORE/);
+  const moreIndex = lines.findIndex((line) => line.includes('moreEvidence'));
+  const lessIndex = lines.findIndex((line) => line.includes('lessEvidence'));
+  assert.ok(moreIndex > 0 && lessIndex > 0);
+  assert.ok(moreIndex < lessIndex, 'the test with more evidence must rank first');
+  assert.match(text.stdout, /10 runs, 2 tests, 12 attempts, 10 XML files\./);
+});
+
+test('--top truncates the printed table and says how many tests were hidden', (t) => {
+  const { runs } = fixture(t);
+  writeFile(
+    runs,
+    'run-1/results.xml',
+    junit(
+      [
+        testcase('pkg.TopTableTest', 'flaky', '<failure/>'),
+        testcase('pkg.TopTableTest', 'flaky'),
+        testcase('pkg.TopTableTest', 'stable'),
+      ].join('\n'),
+    ),
+  );
+
+  const text = runCli(['scan', runs, '--top', '1']);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /pkg\.TopTableTest::flaky/);
+  assert.doesNotMatch(text.stdout, /pkg\.TopTableTest::stable/);
+  assert.match(text.stdout, /showing 1 of 2 tests/);
+});
+
+test('explain --json exposes the per-run attempts for machines', (t) => {
+  const { runs } = fixture(t);
+  writeFile(
+    runs,
+    'run-1/results.xml',
+    junit(
+      testcase(
+        'pkg.TimelineJsonTest',
+        'eventually',
+        '<flakyFailure message="first try&amp;failed" type="AssertionError"/>',
+      ),
+    ),
+  );
+
+  const result = runCli(['explain', runs, 'pkg.TimelineJsonTest::eventually', '--json']);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.tool, 'flake-ledger');
+  assert.equal(output.test.id, 'pkg.TimelineJsonTest::eventually');
+  assert.equal(output.test.classification, 'passed-on-retry');
+  assert.equal(output.test.timeline.length, 1);
+  assert.deepEqual(
+    output.test.timeline[0].attempts.map((attempt) => attempt.status),
+    ['failed', 'passed'],
+  );
+  assert.equal(output.test.timeline[0].attempts[0].message, 'first try&failed');
+});
+
+test('a pass followed by a final failure is classified failed-on-retry', (t) => {
+  const { runs } = fixture(t);
+  writeFile(
+    runs,
+    'run-1/results.xml',
+    junit(
+      [
+        testcase('pkg.RetryOutcomeTest', 'regressed'),
+        testcase('pkg.RetryOutcomeTest', 'regressed', '<failure message="second attempt failed"/>'),
+      ].join('\n'),
+    ),
+  );
+
+  const result = scanJson(runs);
+  const record = byId(result, 'pkg.RetryOutcomeTest::regressed');
+  assert.equal(record.classification, 'failed-on-retry');
+  assert.equal(record.failedOnRetryRuns, 1);
+  assert.equal(record.attempts, 2);
+  assert.deepEqual(
+    record.timeline[0].attempts.map((attempt) => attempt.status),
+    ['passed', 'failed'],
+  );
+});
+
+test('--group-by file makes every XML document its own run', (t) => {
+  const { runs } = fixture(t);
+  writeFile(runs, 'run-1/shard-a.xml', junit(testcase('pkg.GroupTest', 'a')));
+  writeFile(runs, 'run-1/shard-b.xml', junit(testcase('pkg.GroupTest', 'b')));
+
+  const auto = scanJson(runs);
+  assert.equal(auto.totals.runs, 1);
+  assert.equal(auto.totals.tests, 2);
+
+  const perFile = scanJson(runs, ['--group-by', 'file']);
+  assert.equal(perFile.totals.runs, 2);
+  assert.equal(perFile.totals.tests, 2);
+  assert.deepEqual(perFile.runs.map((run) => run.id).sort(), ['shard-a', 'shard-b']);
+});
+
+test('--group-by parent groups by immediate directory', (t) => {
+  const { runs } = fixture(t);
+  writeFile(runs, 'run-1/results.xml', junit(testcase('pkg.ParentTest', 'a')));
+  writeFile(runs, 'run-1/nested/results.xml', junit(testcase('pkg.ParentTest', 'a')));
+
+  const auto = scanJson(runs);
+  assert.equal(auto.totals.runs, 1);
+  assert.equal(byId(auto, 'pkg.ParentTest::a').attempts, 2);
+
+  const byParent = scanJson(runs, ['--group-by', 'parent']);
+  assert.equal(byParent.totals.runs, 2);
+  assert.equal(byId(byParent, 'pkg.ParentTest::a').attempts, 2);
+});
