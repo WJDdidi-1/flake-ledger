@@ -8,14 +8,32 @@
   "bin": {
     "flake-ledger": "./bin/flake-ledger.mjs"
   },
+  "files": [
+    "bin/",
+    "lib/"
+  ],
   "scripts": {
     "test": "node --test"
   },
   "engines": {
     "node": ">=18"
   },
+  "keywords": [
+    "ci",
+    "flaky-tests",
+    "junit",
+    "junit-xml",
+    "playwright",
+    "pytest",
+    "surefire",
+    "test-reliability"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/WJDdidi-1/flake-ledger.git"
-  }
+  },
+  "bugs": {
+    "url": "https://github.com/WJDdidi-1/flake-ledger/issues"
+  },
+  "homepage": "https://github.com/WJDdidi-1/flake-ledger#readme"
 }
