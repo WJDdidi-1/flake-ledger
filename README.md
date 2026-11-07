@@ -256,6 +256,43 @@ The command fails only when a flaky classification crosses the threshold. Keep
 the `flaky.txt` artifact or commit it if your test runner supports reading a
 quarantine list.
 
+## FAQ
+
+**Do I have to install it globally?**
+No. From a checkout, call the CLI through Node:
+
+```sh
+node bin/flake-ledger.mjs scan path/to/runs
+```
+
+A global install just makes `flake-ledger` available on your `PATH`.
+
+**Does it run or retry my tests?**
+No. `flake-ledger` reads JUnit XML that your test runner already produced; it
+does not execute tests, change retry settings, or modify reports.
+
+**Does it upload my reports anywhere?**
+No. `scan` and `explain` read local XML and write to stdout, `--json`, or the
+`--quarantine` file you name. There are no network calls and no runtime
+dependencies.
+
+**How do I fail CI only on well-evidenced flakes?**
+Combine both thresholds:
+
+```sh
+flake-ledger scan path/to/runs --fail-on 0.3 --min-runs 10
+```
+
+On a readable runs directory, this exits 1 only when a flaky classification has
+at least 10 eligible runs and an unstable rate of at least 30%; otherwise it
+exits 0. Without `--fail-on`, `scan` is report-only.
+
+**How much history do I need?**
+One run is enough to produce a ledger, and a single run can already show
+`passed-on-retry` evidence; cross-run flakes need at least two runs. The score
+is a 95% Wilson lower bound on the unstable rate, so use `--min-runs` to require
+enough history before `--fail-on` can fail the build.
+
 ## How we know it works
 
 `npm test` builds temporary JUnit fixtures and exercises every feature above
