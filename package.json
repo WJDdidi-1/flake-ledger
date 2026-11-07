@@ -1,0 +1,20 @@
+{
+  "name": "flake-ledger",
+  "version": "0.1.0",
+  "description": "Ranks flaky tests from JUnit XML across CI runs, including passed-on-retry.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "flake-ledger": "./bin/flake-ledger.mjs"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WJDdidi-1/flake-ledger.git"
+  }
+}
