@@ -13,10 +13,13 @@ green build.
 
 ## A real session
 
-The example below is five CI runs, one JUnit report per run:
+The five runs are checked in at [`examples/runs`](examples/runs), one JUnit
+report per run. From a checkout, `npm run example` (or
+`node examples/demo.mjs`) runs the same CLI commands against those files and
+checks the output:
 
 ```text
-/tmp/flake-ledger-example/runs/
+examples/runs/
   run-01/results.xml
   run-02/results.xml
   run-03/results.xml
@@ -43,7 +46,7 @@ Scan the tree. The table is ranked by a 95% Wilson lower bound on unstable
 rate, so a test with more evidence outranks one with a single bad run:
 
 ```console
-$ flake-ledger scan /tmp/flake-ledger-example/runs
+$ flake-ledger scan examples/runs
 TEST ID                                     RUNS  ATTEMPTS  UNSTABLE  PASS-ON-RETRY  FAILED  RATE   SCORE  CLASS
 com.example.LoginTest::rejectsExpiredToken  5     5         2         0              2       40.0%  0.118  cross-run flake
 com.example.SearchTest::filtersByPrice      5     5         2         0              2       40.0%  0.118  cross-run flake
@@ -56,45 +59,46 @@ com.example.ReportTest::exportsCsv          5     5         0         0         
 
 `appliesCoupon` has five runs but seven attempts and two passed-on-retry runs:
 the two red attempts are not lost. `explain` prints the timeline that produced
-the score:
+the score (it prints absolute paths; they are shown here relative to the
+repository root):
 
 ```console
-$ flake-ledger explain /tmp/flake-ledger-example/runs 'com.example.CheckoutTest::appliesCoupon'
+$ flake-ledger explain examples/runs 'com.example.CheckoutTest::appliesCoupon'
 com.example.CheckoutTest::appliesCoupon
   classification: passed-on-retry
   runs: 5  attempts: 7  unstable: 2/5  rate: 40.0%  score: 0.118
 
   run run-01  passed-on-retry  2 attempts
-    /tmp/flake-ledger-example/runs/run-01
-    #1 failed  /tmp/flake-ledger-example/runs/run-01/results.xml
+    examples/runs/run-01
+    #1 failed  examples/runs/run-01/results.xml
          expected 10% discount, got 0
-    #2 passed  /tmp/flake-ledger-example/runs/run-01/results.xml (retried)
+    #2 passed  examples/runs/run-01/results.xml (retried)
 
   run run-02  passed  1 attempt
-    /tmp/flake-ledger-example/runs/run-02
-    #1 passed  /tmp/flake-ledger-example/runs/run-02/results.xml
+    examples/runs/run-02
+    #1 passed  examples/runs/run-02/results.xml
 
   run run-03  passed-on-retry  2 attempts
-    /tmp/flake-ledger-example/runs/run-03
-    #1 failed  /tmp/flake-ledger-example/runs/run-03/results.xml
+    examples/runs/run-03
+    #1 failed  examples/runs/run-03/results.xml
          expected 10% discount, got 0
-    #2 passed  /tmp/flake-ledger-example/runs/run-03/results.xml (retried)
+    #2 passed  examples/runs/run-03/results.xml (retried)
 
   run run-04  passed  1 attempt
-    /tmp/flake-ledger-example/runs/run-04
-    #1 passed  /tmp/flake-ledger-example/runs/run-04/results.xml
+    examples/runs/run-04
+    #1 passed  examples/runs/run-04/results.xml
 
   run run-05  passed  1 attempt
-    /tmp/flake-ledger-example/runs/run-05
-    #1 passed  /tmp/flake-ledger-example/runs/run-05/results.xml
+    examples/runs/run-05
+    #1 passed  examples/runs/run-05/results.xml
 ```
 
 Use the ledger as a CI gate and write the quarantine list. The table on stdout
 is the same one shown above, so it is omitted here:
 
 ```console
-$ flake-ledger scan /tmp/flake-ledger-example/runs --quarantine flaky.txt --fail-on 0.2 --min-runs 5 > /dev/null
-wrote 3 flaky test ids to /tmp/flake-ledger-example/flaky.txt
+$ flake-ledger scan examples/runs --quarantine flaky.txt --fail-on 0.2 --min-runs 5 > /dev/null
+wrote 3 flaky test ids to flaky.txt
 flaky: com.example.LoginTest::rejectsExpiredToken unstable in 2/5 runs (40.0%) >= 20.0%
 flaky: com.example.SearchTest::filtersByPrice unstable in 2/5 runs (40.0%) >= 20.0%
 flaky: com.example.CheckoutTest::appliesCoupon unstable in 2/5 runs (40.0%) >= 20.0%
@@ -140,9 +144,15 @@ npm install --global .
 flake-ledger --version
 ```
 
+To try it without a global install, run the checked-in five-run example:
+
+```sh
+npm run example
+```
+
 Requires Node.js 18 or newer. There are no runtime dependencies, and the
-published package contains only the runtime (`bin/`, `lib/`) plus package
-metadata, `README.md`, and `LICENSE`.
+published package contains the runtime (`bin/`, `lib/`), the checked-in example
+(`examples/`), package metadata, `README.md`, and `LICENSE`.
 
 ## Use
 
@@ -300,6 +310,11 @@ through the CLI: recursive scanning, shard merging, repeated testcases,
 Surefire `flakyFailure`/`rerunFailure`, retry attributes, all classifications,
 Wilson-bound table ordering, `--json`, `--top`, `--quarantine`, `explain`, and
 `--fail-on`/`--min-runs`.
+
+The checked-in fixture under [`examples/runs`](examples/runs) is a second,
+readable path through the same CLI: `npm run example` runs `scan`, `explain`,
+`--quarantine`, and the CI gate against it, and exits nonzero if the table,
+timeline, quarantine list, or exit codes change.
 
 CI runs the suite on Ubuntu, macOS (Intel), and Windows for Node.js 18, 20, 22,
 and 24. Each job also packs the tarball, installs it into a clean directory,

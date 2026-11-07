@@ -10,10 +10,12 @@
   },
   "files": [
     "bin/",
-    "lib/"
+    "lib/",
+    "examples/"
   ],
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "example": "node examples/demo.mjs"
   },
   "engines": {
     "node": ">=18"
