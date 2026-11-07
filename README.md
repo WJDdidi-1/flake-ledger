@@ -1,6 +1,7 @@
 # flake-ledger
 
 [![CI](https://github.com/WJDdidi-1/flake-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/WJDdidi-1/flake-ledger/actions/workflows/ci.yml)
+[![version](https://img.shields.io/github/package-json/v/WJDdidi-1/flake-ledger)](https://github.com/WJDdidi-1/flake-ledger/releases)
 
 Ranks flaky tests from JUnit XML across CI runs, including passed-on-retry.
 
@@ -128,19 +129,20 @@ free, offline, cross-runner ledger plus a quarantine file.
 
 ## Install
 
-From npm:
-
-```sh
-npm install --global flake-ledger
-flake-ledger --version
-```
-
 From a checkout:
 
 ```sh
 git clone https://github.com/WJDdidi-1/flake-ledger.git
 cd flake-ledger
 npm install --global .
+flake-ledger --version
+```
+
+The npm package is published by the release workflow when a `v*` tag is
+pushed; the first release is `v0.1.0`. Once that release is out:
+
+```sh
+npm install --global flake-ledger
 flake-ledger --version
 ```
 
@@ -327,6 +329,19 @@ From a checkout, the same commands run against the local entry point:
 npm test
 node bin/flake-ledger.mjs scan path/to/runs
 ```
+
+## Releases
+
+Versions are SemVer tags (`vMAJOR.MINOR.PATCH`) and must match `version` in
+`package.json`. Pushing a `v*` tag runs the publish workflow, which tests,
+packs the tarball, installs it into a clean directory, and publishes it to npm
+with provenance. The first release is `v0.1.0`, matching `version` `0.1.0` in
+`package.json`.
+
+Release notes for each version live in
+[`docs/releases`](https://github.com/WJDdidi-1/flake-ledger/tree/main/docs/releases),
+and the maintainer steps are in
+[`docs/RELEASING.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/RELEASING.md).
 
 ## Status
 
