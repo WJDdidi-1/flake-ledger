@@ -170,6 +170,11 @@ attempts, 0 passed-on-retry runs, and class `stable`. `flake-ledger` cannot
 recover that retry from the file; set `includeRetries: true` (or
 `PLAYWRIGHT_JUNIT_INCLUDE_RETRIES=1`) if you want retry evidence in the ledger.
 
+The GitHub Actions artifact layout is measured separately:
+[`docs/github-actions.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/github-actions.md)
+records the exact `gh run download` commands and the scan output for a two-shard
+run, including what happens when the artifact names do not carry the run id.
+
 ## Who it is for
 
 Maintainers of multi-runner CI suites (pytest, Playwright, xUnit,
@@ -280,32 +285,34 @@ run as well. Use `--group-by file` to make every XML document its own run, or
 
 ### GitHub Actions artifacts
 
-`gh run download` writes one directory per artifact, not one directory per run.
-There are two reliable layouts:
+`gh run download` extracts artifacts by artifact name, not by workflow run.
+Without `-n`/`--pattern` it writes `<dir>/<artifact-name>/...`, even when the
+run has a single artifact; naming exactly one artifact extracts its contents
+directly into `<dir>`. The safe rule is one directory per run:
 
-1. Download each run into its own directory. The run directory is then the
-   normal `runs/<run-id>/...` layout, with one artifact directory (or several)
-   inside it:
+```sh
+gh run download 1234567890 --dir runs/1234567890
+flake-ledger scan runs
+```
 
-   ```sh
-   gh run download 1234567890 --dir runs/1234567890
-   flake-ledger scan runs
-   ```
+Everything under `runs/1234567890` is one run whether the download produced one
+artifact directory or several, so a test that appears in two shards has two
+attempts in one run rather than two separate runs. This also handles a single
+artifact that contains several XML files, which a flat download would otherwise
+treat as separate runs.
 
-2. If artifact names include `${{ github.run_id }}` plus a shard or matrix
-   suffix, `scan` merges them automatically:
+If artifact names include `${{ github.run_id }}` plus a shard or matrix suffix,
+a flat download of one run can be grouped without naming it:
 
-   ```text
-   runs/
-     junit-1234567890-1/results.xml
-     junit-1234567890-2/results.xml
-   ```
+```text
+runs/
+  junit-1234567890-1/results.xml
+  junit-1234567890-2/results.xml
+```
 
-   Both directories are one run (`1234567890`), so a test in both shards has
-   two attempts in one run rather than two separate runs. If those numeric
-   directories are actually separate runs, use `--group-by parent` to keep one
-   run per directory.
-
+Artifact directories that share the encoded run id merge automatically, so the
+two directories above are run `1234567890`. If those numeric directories are
+actually separate runs, use `--group-by parent` to keep one run per directory.
 If artifact names do not carry the run id, name the run explicitly for a
 single downloaded run:
 
@@ -319,7 +326,8 @@ labels it (passing `--run-id` alone implies that mode; without it the id is the
 `<runs-dir>` basename). Do not mix artifacts from different runs in one flat
 directory without run ids: their boundaries cannot be inferred, and `scan` will
 treat each artifact as its own run. Download each run into `runs/<run-id>/`
-instead.
+instead. The measured commands and output for both layouts are in
+[`docs/github-actions.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/github-actions.md).
 
 Supported inputs are Surefire and compatible JUnit XML, including
 `<failure>`, `<error>`, `<skipped>`, `<flakyFailure>`, `<flakyError>`,
@@ -360,8 +368,9 @@ per test (limited to the first N by `--top`) with its `attempts`,
 ## Use it in CI
 
 Download the artifacts into one directory per run, then gate on the ledger.
-`actions/download-artifact` writes one directory per artifact, so put it under
-`runs/${{ github.run_id }}/` to keep the run boundary:
+`actions/download-artifact` creates one directory per artifact when several are
+downloaded; putting them under `runs/${{ github.run_id }}/` keeps the run
+boundary either way:
 
 ```yaml
 - uses: actions/download-artifact@v4
@@ -382,7 +391,9 @@ If you download one run directly into `runs/`, pass `--group-by run --run-id
 "$GITHUB_RUN_ID"` so its artifact directories remain shards of one run. If you
 keep artifacts from several runs in one directory, include the run id in each
 artifact name (for example `junit-${{ github.run_id }}-${{ matrix.shard }}`) so
-`scan` can group them automatically.
+`scan` can group them automatically. The measured download commands, including
+the single-artifact case, are in
+[`docs/github-actions.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/github-actions.md).
 
 The command fails only when a flaky classification crosses the threshold. Keep
 the `flaky.txt` artifact or commit it if your test runner supports reading a
@@ -441,6 +452,13 @@ timeline, quarantine list, or exit codes change.
 The real-runner measurement in [`docs/real-world.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/real-world.md)
 records the exact commands and output from pytest-rerunfailures and Playwright,
 including the Playwright `includeRetries` caveat.
+
+The GitHub Actions measurement in
+[`docs/github-actions.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/github-actions.md)
+records the artifact names, the exact `gh run download` commands, and the scan
+output for a two-shard run. It shows the same test as `1 run, 2 attempts` when
+grouped correctly and as two synthetic runs when the artifact names do not
+carry the run id.
 
 CI runs the suite on Ubuntu, macOS (Intel), and Windows for Node.js 18, 20, 22,
 and 24. Each job also packs the tarball, installs it into a clean directory,
