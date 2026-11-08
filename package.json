@@ -1,6 +1,6 @@
 {
   "name": "flake-ledger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Ranks flaky tests from JUnit XML across CI runs, including passed-on-retry.",
   "license": "Apache-2.0",
   "type": "module",

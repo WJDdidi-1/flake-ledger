@@ -194,11 +194,11 @@ flake-ledger --version
 ```
 
 The npm package is published by the release workflow when a `v*` tag is
-pushed; the first release is `v0.1.0`. Once that release is out:
+pushed. The latest release is `v0.1.1`:
 
 ```sh
-npm install --global flake-ledger
-flake-ledger --version
+npm install --global flake-ledger@0.1.1
+flake-ledger --version   # 0.1.1
 ```
 
 To try it without a global install, run the checked-in five-run example:
@@ -401,10 +401,11 @@ node bin/flake-ledger.mjs scan path/to/runs
 Versions are SemVer tags (`vMAJOR.MINOR.PATCH`) and must match `version` in
 `package.json`. Pushing a `v*` tag runs the publish workflow, which tests,
 packs the tarball, installs it into a clean directory, and publishes it to npm
-with provenance. The first release is `v0.1.0`, matching `version` `0.1.0` in
+with provenance. The latest release is `v0.1.1`, matching `version` `0.1.1` in
 `package.json`.
 
-Release notes for each version live in
+The changelog for each version lives in [`CHANGELOG.md`](CHANGELOG.md), the
+per-release GitHub Release bodies are in
 [`docs/releases`](https://github.com/WJDdidi-1/flake-ledger/tree/main/docs/releases),
 and the maintainer steps are in
 [`docs/RELEASING.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/RELEASING.md).
