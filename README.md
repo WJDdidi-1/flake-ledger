@@ -257,7 +257,8 @@ percentage (`50`). Exit codes:
 | `--quarantine <file>` | Write the ids of flaky tests, one per line. |
 | `--fail-on <rate>` | Exit 1 when a flaky test's unstable rate is at or above `<rate>`. |
 | `--min-runs <n>` | With `--fail-on`, ignore tests with fewer than `n` eligible runs. |
-| `--group-by <mode>` | `auto` (default), `file`, or `parent`; controls what counts as one run. |
+| `--group-by <mode>` | `auto` (default), `file`, `parent`, or `run`; controls what counts as one run. |
+| `--run-id <id>` | Label the one run and imply `--group-by run`; useful for a single `gh run download` tree. |
 
 ## Input layout
 
@@ -276,6 +277,49 @@ names carry a shard marker (`shard-1.xml`, `run-3-part-2.xml`). Top-level
 shard-named run directories (`run-3-shard-1/`, `run-3-shard-2/`) merge into one
 run as well. Use `--group-by file` to make every XML document its own run, or
 `--group-by parent` to group by immediate directory.
+
+### GitHub Actions artifacts
+
+`gh run download` writes one directory per artifact, not one directory per run.
+There are two reliable layouts:
+
+1. Download each run into its own directory. The run directory is then the
+   normal `runs/<run-id>/...` layout, with one artifact directory (or several)
+   inside it:
+
+   ```sh
+   gh run download 1234567890 --dir runs/1234567890
+   flake-ledger scan runs
+   ```
+
+2. If artifact names include `${{ github.run_id }}` plus a shard or matrix
+   suffix, `scan` merges them automatically:
+
+   ```text
+   runs/
+     junit-1234567890-1/results.xml
+     junit-1234567890-2/results.xml
+   ```
+
+   Both directories are one run (`1234567890`), so a test in both shards has
+   two attempts in one run rather than two separate runs. If those numeric
+   directories are actually separate runs, use `--group-by parent` to keep one
+   run per directory.
+
+If artifact names do not carry the run id, name the run explicitly for a
+single downloaded run:
+
+```sh
+gh run download 1234567890 --dir runs
+flake-ledger scan runs --group-by run --run-id 1234567890
+```
+
+`--group-by run` puts every XML under `<runs-dir>` in one run, and `--run-id`
+labels it (passing `--run-id` alone implies that mode; without it the id is the
+`<runs-dir>` basename). Do not mix artifacts from different runs in one flat
+directory without run ids: their boundaries cannot be inferred, and `scan` will
+treat each artifact as its own run. Download each run into `runs/<run-id>/`
+instead.
 
 Supported inputs are Surefire and compatible JUnit XML, including
 `<failure>`, `<error>`, `<skipped>`, `<flakyFailure>`, `<flakyError>`,
@@ -315,16 +359,30 @@ per test (limited to the first N by `--top`) with its `attempts`,
 
 ## Use it in CI
 
-Collect one directory per CI run (artifact names become run ids), download the
-reports, and gate on the ledger:
+Download the artifacts into one directory per run, then gate on the ledger.
+`actions/download-artifact` writes one directory per artifact, so put it under
+`runs/${{ github.run_id }}/` to keep the run boundary:
 
 ```yaml
 - uses: actions/download-artifact@v4
   with:
-    path: runs
+    path: runs/${{ github.run_id }}
 - run: npm install --global flake-ledger
 - run: flake-ledger scan runs --fail-on 0.3 --min-runs 10 --quarantine flaky.txt
 ```
+
+When downloading with the CLI instead, use the same shape:
+
+```sh
+gh run download "$GITHUB_RUN_ID" --dir "runs/$GITHUB_RUN_ID"
+flake-ledger scan runs --fail-on 0.3 --min-runs 10 --quarantine flaky.txt
+```
+
+If you download one run directly into `runs/`, pass `--group-by run --run-id
+"$GITHUB_RUN_ID"` so its artifact directories remain shards of one run. If you
+keep artifacts from several runs in one directory, include the run id in each
+artifact name (for example `junit-${{ github.run_id }}-${{ matrix.shard }}`) so
+`scan` can group them automatically.
 
 The command fails only when a flaky classification crosses the threshold. Keep
 the `flaky.txt` artifact or commit it if your test runner supports reading a

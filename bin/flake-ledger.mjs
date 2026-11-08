@@ -27,13 +27,16 @@ Scan options:
   --quarantine <file>     write the ids of flaky tests, one per line
   --fail-on <rate>        exit 1 when a flaky test's unstable rate is >= rate
   --min-runs <n>          only fail on tests seen in at least n runs (default: 1)
-  --group-by <mode>       auto (default), file, or parent
+  --group-by <mode>       auto (default), file, parent, or run
+  --run-id <id>           label the single run; implies --group-by run
 
 Layout:
   runs/<run-id>/<shard>.xml merges every XML in that run directory (shards)
   runs/<run-id>.xml         each XML directly under runs-dir is its own run
   runs/shard-1.xml          explicit shard names directly under runs-dir merge
   runs/run-3-shard-1/*.xml  shard-named run directories merge into run-3
+  runs/<artifact>/...       artifact dirs sharing a GitHub run id merge
+                            one gh run download tree: --group-by run --run-id <id>
 
 MVP features:
   - scan recursively parses every JUnit XML, merges sharded files, and
@@ -105,7 +108,8 @@ function parseGroupBy(value) {
   if (mode === 'auto' || mode === 'dir' || mode === 'directory') return 'auto';
   if (mode === 'file' || mode === 'each-file') return 'file';
   if (mode === 'parent' || mode === 'folder') return 'parent';
-  throw new CliError('option --group-by must be auto, file, or parent');
+  if (mode === 'run' || mode === 'single' || mode === 'gh-download') return 'run';
+  throw new CliError('option --group-by must be auto, file, parent, or run');
 }
 
 function parseScanArgs(argv) {
@@ -116,6 +120,7 @@ function parseScanArgs(argv) {
     failOn: null,
     minRuns: 1,
     groupBy: 'auto',
+    runId: null,
   };
   const positionals = [];
 
@@ -156,11 +161,24 @@ function parseScanArgs(argv) {
       const consumed = requireValue(argv, index, name, inline);
       index = consumed.index;
       options.groupBy = parseGroupBy(consumed.value);
+    } else if (name === '--run-id') {
+      const consumed = requireValue(argv, index, name, inline);
+      index = consumed.index;
+      options.runId = consumed.value;
     } else {
       throw new CliError(`unknown option ${arg}`);
     }
   }
 
+  if (options.runId !== null) {
+    if (options.runId.trim() === '') {
+      throw new CliError('option --run-id needs a non-empty value');
+    }
+    if (options.groupBy === 'auto') options.groupBy = 'run';
+    else if (options.groupBy !== 'run') {
+      throw new CliError('option --run-id can only be used with --group-by run');
+    }
+  }
   if (positionals.length !== 1) {
     throw new CliError('scan needs exactly one <runs-dir>');
   }
@@ -169,7 +187,7 @@ function parseScanArgs(argv) {
 }
 
 function parseExplainArgs(argv) {
-  const options = { json: false, groupBy: 'auto' };
+  const options = { json: false, groupBy: 'auto', runId: null };
   const positionals = [];
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -193,6 +211,10 @@ function parseExplainArgs(argv) {
       const consumed = requireValue(argv, index, name, inline);
       index = consumed.index;
       options.groupBy = parseGroupBy(consumed.value);
+    } else if (name === '--run-id') {
+      const consumed = requireValue(argv, index, name, inline);
+      index = consumed.index;
+      options.runId = consumed.value;
     } else if (name === '--top') {
       // Accepted for symmetry with scan; explain always prints one test.
       const consumed = requireValue(argv, index, name, inline);
@@ -203,6 +225,15 @@ function parseExplainArgs(argv) {
     }
   }
 
+  if (options.runId !== null) {
+    if (options.runId.trim() === '') {
+      throw new CliError('option --run-id needs a non-empty value');
+    }
+    if (options.groupBy === 'auto') options.groupBy = 'run';
+    else if (options.groupBy !== 'run') {
+      throw new CliError('option --run-id can only be used with --group-by run');
+    }
+  }
   if (positionals.length !== 2) {
     throw new CliError('explain needs a <runs-dir> and a test id');
   }
@@ -223,7 +254,10 @@ function writeQuarantine(file, ids) {
 }
 
 function runScan(options) {
-  const result = scanRuns(options.runsDir, { groupBy: options.groupBy });
+  const result = scanRuns(options.runsDir, {
+    groupBy: options.groupBy,
+    runId: options.runId,
+  });
   printWarnings(result.warnings);
 
   const shown = options.top === null ? result.tests : result.tests.slice(0, options.top);
@@ -301,7 +335,10 @@ function findTest(result, query) {
 }
 
 function runExplain(options) {
-  const result = scanRuns(options.runsDir, { groupBy: options.groupBy });
+  const result = scanRuns(options.runsDir, {
+    groupBy: options.groupBy,
+    runId: options.runId,
+  });
   printWarnings(result.warnings);
   const { test, matches } = findTest(result, options.query);
   if (!test) {
