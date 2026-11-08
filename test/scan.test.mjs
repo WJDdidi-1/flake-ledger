@@ -613,6 +613,85 @@ test('--group-by parent groups by immediate directory', (t) => {
   assert.equal(byId(byParent, 'pkg.ParentTest::a').attempts, 2);
 });
 
+test('--group-by run merges one gh run download artifact tree into one run', (t) => {
+  const { runs } = fixture(t);
+  // `gh run download <id> --dir runs` produces one directory per artifact.
+  // These artifact names do not carry the run id, so the user names the run.
+  writeFile(
+    runs,
+    'junit-results-1/results.xml',
+    junit(
+      [
+        testcase('pkg.ArtifactTest', 'flaky', '<failure message="first artifact"/>'),
+        testcase('pkg.ArtifactTest', 'stable'),
+      ].join('\n'),
+    ),
+  );
+  writeFile(
+    runs,
+    'junit-results-2/results.xml',
+    junit(testcase('pkg.ArtifactTest', 'flaky')),
+  );
+
+  const auto = scanJson(runs);
+  assert.equal(auto.totals.runs, 2, 'without the flag each artifact looks like its own run');
+
+  const result = scanJson(runs, ['--group-by', 'run', '--run-id', '1234567890']);
+  assert.equal(result.totals.files, 2);
+  assert.equal(result.totals.runs, 1);
+  assert.equal(result.runs[0].id, '1234567890');
+  assert.equal(result.runs[0].fileCount, 2);
+
+  const flaky = byId(result, 'pkg.ArtifactTest::flaky');
+  assert.equal(flaky.runs, 1, 'both artifacts are shards of one run');
+  assert.equal(flaky.attempts, 2);
+  assert.equal(flaky.passedOnRetryRuns, 1);
+  assert.equal(flaky.classification, 'passed-on-retry');
+  assert.deepEqual(flaky.runIds, ['1234567890']);
+});
+
+test('scan auto-merges artifact directories that carry the same GitHub run id', (t) => {
+  const { runs } = fixture(t);
+  // GitHub artifact names often include ${{ github.run_id }} and a shard
+  // index. Two directories from that download belong to one run without a flag.
+  writeFile(
+    runs,
+    'junit-1234567890-1/results.xml',
+    junit(testcase('pkg.EncodedRunTest', 'eventually', '<failure message="shard one"/>')),
+  );
+  writeFile(
+    runs,
+    'junit-1234567890-2/results.xml',
+    junit(testcase('pkg.EncodedRunTest', 'eventually')),
+  );
+
+  const result = scanJson(runs);
+  assert.equal(result.totals.files, 2);
+  assert.equal(result.totals.runs, 1);
+  assert.equal(result.runs[0].id, '1234567890');
+  assert.equal(result.runs[0].fileCount, 2);
+
+  const record = byId(result, 'pkg.EncodedRunTest::eventually');
+  assert.equal(record.runs, 1);
+  assert.equal(record.attempts, 2);
+  assert.equal(record.classification, 'passed-on-retry');
+  assert.deepEqual(record.runIds, ['1234567890']);
+});
+
+test('--run-id implies a single run and --group-by names supported modes', (t) => {
+  const { runs } = fixture(t);
+  writeFile(runs, 'junit-a/results.xml', junit(testcase('pkg.LabelTest', 'a')));
+  writeFile(runs, 'junit-b/results.xml', junit(testcase('pkg.LabelTest', 'b')));
+
+  const implied = scanJson(runs, ['--run-id', 'run-42']);
+  assert.equal(implied.totals.runs, 1);
+  assert.equal(implied.runs[0].id, 'run-42');
+
+  const invalid = runCli(['scan', runs, '--group-by', 'artifact-tree']);
+  assert.equal(invalid.status, 2);
+  assert.match(invalid.stderr, /auto, file, parent, or run/);
+});
+
 test('pytest-rerunfailures repeated passing testcases are passed-on-retry', (t) => {
   const { runs } = fixture(t);
   // pytest-rerunfailures writes one <testcase> per attempt. When the retry
