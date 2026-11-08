@@ -4,6 +4,28 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/), and each released version is a
 `v*` tag that matches the `version` in `package.json`.
 
+## [0.1.2] - 2026-11-09
+
+### Added
+
+- `scan` and `explain` accept `--group-by run` and `--run-id <id>`, so a flat
+  `gh run download` tree can be treated as one CI run even when its artifact
+  names do not embed the run id.
+
+### Fixed
+
+- GitHub Actions artifact directories whose names embed the same run id (for
+  example `junit-1234567890-1` and `junit-1234567890-2`) are now merged into
+  one run. Previously each artifact directory was counted as its own run, so a
+  test that ran in two shards looked like a cross-run signal instead of two
+  attempts in one run. Installations without encoded run ids keep the old
+  one-directory-per-run behavior unless `--group-by run` is passed.
+
+### Documentation
+
+- Documented the GitHub Actions artifact layouts, the exact `gh run download`
+  commands, and the measured output in the README and `docs/github-actions.md`.
+
 ## [0.1.1] - 2026-11-09
 
 ### Fixed
