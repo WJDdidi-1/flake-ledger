@@ -115,6 +115,61 @@ com.example.CheckoutTest::appliesCoupon
 `--fail-on` and `--min-runs` are opt-in; without them the command is
 report-only and exits 0.
 
+## Measured on real test runners
+
+The checked-in example is hand-written. To check the parser against output it
+did not create, the same CLI was run against JUnit XML produced by pytest
+9.2.0 with pytest-rerunfailures 16.7 and by Playwright 1.65.0. Each fixture had
+ten runs, one directory per run; the test files, configs, and commands are in
+[`docs/real-world.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/real-world.md).
+
+pytest-rerunfailures writes one `<testcase>` per attempt, so a test that failed
+once and then passed on retry appears as two passing testcases. From the
+fixture directory, `flake-ledger scan runs` printed:
+
+```console
+$ flake-ledger scan runs
+TEST ID                              RUNS  ATTEMPTS  UNSTABLE  PASS-ON-RETRY  FAILED  RATE    SCORE  CLASS
+test_checkout::test_always_failing   10    20        10        0              10      100.0%  0.722  failed-on-retry
+test_checkout::test_applies_coupon   10    20        10        10             0       100.0%  0.722  passed-on-retry
+test_checkout::test_cross_run_flake  10    10        5         0              5       50.0%   0.237  cross-run flake
+test_checkout::test_skipped          10    10        0         0              0       0.0%    0.000  skipped
+test_checkout::test_stable           10    10        0         0              0       0.0%    0.000  stable
+
+10 runs, 5 tests, 70 attempts, 10 XML files.
+```
+
+The recovered test is `passed-on-retry` in all 10 runs, the alternating test is
+`cross-run flake` in 5 of 10, and the stable and skipped tests stay in their
+classes.
+
+Playwright's JUnit reporter writes `<flakyError>`/`<rerunError>` only when
+`includeRetries: true` is set. With that option, two projects (chromium and
+firefox) and ten runs produced:
+
+```console
+$ flake-ledger scan runs
+TEST ID                                      RUNS  ATTEMPTS  UNSTABLE  PASS-ON-RETRY  FAILED  RATE    SCORE  CLASS
+checkout.spec.js::failures › always failing  10    40        10        0              10      100.0%  0.722  always-failing
+checkout.spec.js::checkout › applies coupon  10    40        10        10             0       100.0%  0.722  passed-on-retry
+checkout.spec.js::cross-run flake            10    20        5         0              5       50.0%   0.237  cross-run flake
+checkout.spec.js::skipped                    10    20        0         0              0       0.0%    0.000  skipped
+checkout.spec.js::stable                     10    20        0         0              0       0.0%    0.000  stable
+
+10 runs, 5 tests, 140 attempts, 10 XML files.
+```
+
+The recovered test is `passed-on-retry` in all 10 runs. `stable` has 20 attempts
+because both projects run it, but it is still `stable`: duplicate executions in
+separate Playwright project suites are not retries.
+
+**Playwright caveat:** with the default JUnit reporter, Playwright writes only
+the final attempt for each test, so the retry is not in the XML at all. With the
+same ten runs, the row for `checkout.spec.js::checkout › applies coupon` had 20
+attempts, 0 passed-on-retry runs, and class `stable`. `flake-ledger` cannot
+recover that retry from the file; set `includeRetries: true` (or
+`PLAYWRIGHT_JUNIT_INCLUDE_RETRIES=1`) if you want retry evidence in the ledger.
+
 ## Who it is for
 
 Maintainers of multi-runner CI suites (pytest, Playwright, xUnit,
@@ -228,6 +283,13 @@ Supported inputs are Surefire and compatible JUnit XML, including
 attributes, and repeated `<testcase>` elements for the same test. A malformed
 XML file produces a warning and does not hide healthy files.
 
+Real runners differ in how much of that they emit. pytest-rerunfailures
+recovers a test by writing the passing `<testcase>` again, so repeated passing
+testcases in one suite count as retry evidence. Playwright writes
+`<flakyError>`/`<rerunError>` only with `includeRetries: true`; without it its
+JUnit XML contains only the final attempt. The measured output from both
+runners is in [`docs/real-world.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/real-world.md).
+
 ## What it reports
 
 `scan` collapses all of those attempts into one record per `classname::name`
@@ -317,6 +379,10 @@ The checked-in fixture under [`examples/runs`](examples/runs) is a second,
 readable path through the same CLI: `npm run example` runs `scan`, `explain`,
 `--quarantine`, and the CI gate against it, and exits nonzero if the table,
 timeline, quarantine list, or exit codes change.
+
+The real-runner measurement in [`docs/real-world.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/real-world.md)
+records the exact commands and output from pytest-rerunfailures and Playwright,
+including the Playwright `includeRetries` caveat.
 
 CI runs the suite on Ubuntu, macOS (Intel), and Windows for Node.js 18, 20, 22,
 and 24. Each job also packs the tarball, installs it into a clean directory,
