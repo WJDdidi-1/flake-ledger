@@ -612,3 +612,61 @@ test('--group-by parent groups by immediate directory', (t) => {
   assert.equal(byParent.totals.runs, 2);
   assert.equal(byId(byParent, 'pkg.ParentTest::a').attempts, 2);
 });
+
+test('pytest-rerunfailures repeated passing testcases are passed-on-retry', (t) => {
+  const { runs } = fixture(t);
+  // pytest-rerunfailures writes one <testcase> per attempt. When the retry
+  // recovers the test, the XML contains the same passing testcase twice and
+  // no <failure> element: the failure is only in the console output.
+  const pytestReport = (timestamp) =>
+    `<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="2" time="0.018" timestamp="${timestamp}" hostname="runner"><testcase classname="test_real" name="test_retry_then_pass" time="0.000" /><testcase classname="test_real" name="test_retry_then_pass" time="0.000" /><testcase classname="test_real" name="test_stable" time="0.000" /></testsuite></testsuites>`;
+
+  writeFile(runs, 'run-1/results.xml', pytestReport('2026-01-05T10:00:00+00:00'));
+  writeFile(runs, 'run-2/results.xml', pytestReport('2026-01-05T10:10:00+00:00'));
+
+  const result = scanJson(runs);
+  const retried = byId(result, 'test_real::test_retry_then_pass');
+  assert.equal(retried.runs, 2);
+  assert.equal(retried.attempts, 4);
+  assert.equal(retried.passedOnRetryRuns, 2);
+  assert.equal(retried.unstableRuns, 2);
+  assert.equal(retried.classification, 'passed-on-retry');
+  assert.equal(retried.timeline[0].outcome, 'passed-on-retry');
+  assert.deepEqual(
+    retried.timeline[0].attempts.map((attempt) => attempt.status),
+    ['passed', 'passed'],
+  );
+
+  const stable = byId(result, 'test_real::test_stable');
+  assert.equal(stable.attempts, 2);
+  assert.equal(stable.passedOnRetryRuns, 0);
+  assert.equal(stable.classification, 'stable');
+});
+
+test('identical passes in separate Playwright project suites are not retries', (t) => {
+  const { runs } = fixture(t);
+  // Playwright writes one <testsuite> per project for the same spec file. The
+  // same testcase in chromium and firefox is two executions of one test, not
+  // a failed-then-passed retry, even though the classname/name are identical.
+  writeFile(
+    runs,
+    'run-1/results.xml',
+    `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites id="" name="" tests="2" failures="0" skipped="0" errors="0" time="0.2">
+  <testsuite name="checkout.spec.ts" timestamp="2026-01-05T10:00:00.000Z" hostname="chromium" tests="1" failures="0" skipped="0" time="0.1" errors="0">
+    <testcase name="adds item" classname="checkout.spec.ts" time="0.1"></testcase>
+  </testsuite>
+  <testsuite name="checkout.spec.ts" timestamp="2026-01-05T10:00:00.000Z" hostname="firefox" tests="1" failures="0" skipped="0" time="0.1" errors="0">
+    <testcase name="adds item" classname="checkout.spec.ts" time="0.1"></testcase>
+  </testsuite>
+</testsuites>`,
+  );
+
+  const result = scanJson(runs);
+  const record = byId(result, 'checkout.spec.ts::adds item');
+  assert.equal(record.attempts, 2);
+  assert.equal(record.passedOnRetryRuns, 0);
+  assert.equal(record.unstableRuns, 0);
+  assert.equal(record.classification, 'stable');
+  assert.equal(record.timeline[0].outcome, 'passed');
+});
