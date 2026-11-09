@@ -136,6 +136,11 @@ The two artifact directories are one run, not two. The totals say `1 run` and
 both duplicated tests say `RUNS 1` with `ATTEMPTS 2`. The scanner found the run
 id in the artifact names and merged the directories.
 
+To put a new flake on the pull request instead of only in the log, add
+`--format github` (and optionally `--fail-on new` to fail the job at the same
+time); the exact command and output are in
+[`ci-annotations.md`](ci-annotations.md).
+
 `explain` shows both attempts under the same run id (absolute fixture paths
 shortened to `<fixture>`):
 

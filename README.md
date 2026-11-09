@@ -264,9 +264,25 @@ flake-ledger scan path/to/runs --format github
 ```
 
 Each test whose `trend` is `new` produces one `::warning` line naming its JUnit
-XML file and test id. Chronic, recovered, inactive, and stable tests produce no
-annotation. `--format json` is equivalent to `--json`; the JSON schema is
-unchanged.
+XML file and test id. With `runs/` in the checkout, the output is:
+
+```console
+$ flake-ledger scan runs --format github
+::warning file=runs/run-05/results.xml,title=flake-ledger new flake::pkg.TrendTest::newlyFlaky is a new flake: unstable since run-04 (2/5 runs, 40.0%25).
+```
+
+GitHub decodes `%25` back to `%` when rendering the warning. Chronic, recovered,
+inactive, and stable tests produce no annotation, and if there is no new flake
+the command prints nothing and exits 0. `--format github` is report-only; add
+the new-only gate on the same command when the job should also fail:
+
+```sh
+flake-ledger scan runs --format github --fail-on new
+```
+
+The exact output, a scripted reproduction, and the escaping rules are in
+[`docs/ci-annotations.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/ci-annotations.md).
+`--format json` is equivalent to `--json`; the JSON schema is unchanged.
 
 Explain one test's per-run timeline, including XML paths and failure messages:
 
@@ -534,8 +550,9 @@ enough history before `--fail-on` can fail the build.
 `npm test` builds temporary JUnit fixtures and exercises every feature above
 through the CLI: recursive scanning, shard merging, repeated testcases,
 Surefire `flakyFailure`/`rerunFailure`, retry attributes, all classifications,
-Wilson-bound table ordering, `--json`, `--format github` annotations (one per
-new flake, none for chronic rows), `--top`, `--quarantine`, `explain`,
+Wilson-bound table ordering, `--json`, `--format github` annotations (the exact
+`::warning` command, one per new flake, none for chronic rows, and escaping of
+workflow-command delimiters), `--top`, `--quarantine`, `explain`,
 `new`/`chronic` trends on a scripted five-run timeline, the `--new-window`
 boundary, inactive tests, and `--fail-on` (rate and `new`) with `--min-runs`.
 
@@ -544,6 +561,12 @@ The same new/chronic timeline is reproduced with plain shell and JUnit XML in
 including the `--fail-on new` exit codes and a side-by-side rate gate that
 still sees both rows. Run `npm test` to check the behavior; the page is the
 readable record of what the CLI printed.
+
+The annotation path has its own scripted reproduction in
+[`docs/ci-annotations.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/ci-annotations.md),
+including the exact `::warning` line, silence for chronic rows, the
+`--format github --fail-on new` exit codes, and why delimiters in a test id are
+escaped.
 
 The checked-in fixture under [`examples/runs`](examples/runs) is a second,
 readable path through the same CLI: `npm run example` runs `scan`, `explain`,
