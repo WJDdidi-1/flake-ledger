@@ -4,6 +4,26 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/), and each released version is a
 `v*` tag that matches the `version` in `package.json`.
 
+## [0.3.0] - 2026-11-10
+
+### Added
+
+- `scan --format github` emits one `::warning` workflow command per new flake
+  instead of the terminal table, so GitHub Actions shows the regression on the
+  run and pull request. Each annotation names the newest JUnit XML file and the
+  test id, and only rows whose `trend` is `new` are annotated; chronic,
+  recovered, inactive, and stable tests produce no output. The format is
+  report-only and exits 0, so it composes with `--fail-on new` when the job
+  should also fail. Workflow-command delimiters and `%` in test ids are escaped,
+  and `--format json` remains equivalent to `--json`.
+
+### Documentation
+
+- Documented the annotation path in the README and
+  `docs/ci-annotations.md`, including the exact `::warning` line, silence for
+  chronic rows, the exit codes, and the escaping rules. Added the annotation
+  step to `docs/github-actions.md`.
+
 ## [0.2.0] - 2026-11-10
 
 ### Added
