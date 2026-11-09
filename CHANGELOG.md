@@ -4,6 +4,30 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/), and each released version is a
 `v*` tag that matches the `version` in `package.json`.
 
+## [Unreleased]
+
+### Added
+
+- `scan` marks each test with a `trend`: `new` when the current unstable period
+  started in the newest runs, `chronic` when it is older, `recovered` when the
+  newest observation passed, `inactive` when the test did not appear in the
+  newest run, and `stable` when it has no unstable runs. The terminal table
+  gains a `TREND` column, `explain` prints the trend and its starting run, and
+  `--json` exposes `trend` and `trendSince`.
+- `--fail-on new` exits 1 only for new flakes, so a test that started failing
+  today breaks CI without a long-running known flake doing so. `--fail-on
+  <rate>` keeps its previous behavior.
+- `--new-window <n>` sets how many newest runs can start a new flake (default:
+  2). A window of 1 means only a failure beginning in the newest run is new. A
+  gap of non-unstable observations as long as the window ends the current
+  period, so an alternating long-running flake stays `chronic` instead of being
+  relabeled on every red run.
+
+### Documentation
+
+- Documented the trend values, the new-only gate, the window boundary, and the
+  new JSON fields in the README, including the effect on the checked-in example.
+
 ## [0.1.2] - 2026-11-09
 
 ### Added

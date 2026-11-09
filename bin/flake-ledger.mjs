@@ -25,8 +25,9 @@ Scan options:
   --json, -j              print machine-readable JSON instead of a table
   --top N                 show only the N highest-ranked tests
   --quarantine <file>     write the ids of flaky tests, one per line
-  --fail-on <rate>        exit 1 when a flaky test's unstable rate is >= rate
+  --fail-on <rate|new>    exit 1 on a crossed unstable rate, or only on new flakes
   --min-runs <n>          only fail on tests seen in at least n runs (default: 1)
+  --new-window <n>        newest runs that can start a new flake (default: 2)
   --group-by <mode>       auto (default), file, parent, or run
   --run-id <id>           label the single run; implies --group-by run
 
@@ -49,7 +50,9 @@ MVP features:
   - --quarantine <file> writes flaky-only test ids; explain prints the per-run
     timeline with file paths and failure messages.
   - --fail-on <rate> --min-runs <n> makes CI exit 1 when a flaky test crosses
-    the threshold; the default stays report-only.
+    the threshold; --fail-on new fails only on flakes whose current unstable
+    period started within the newest --new-window runs. The default stays
+    report-only.
 `;
 
 class CliError extends Error {
@@ -90,11 +93,16 @@ function rateValue(value, option) {
   if (raw.endsWith('%')) parsed = Number(raw.slice(0, -1)) / 100;
   else parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new CliError(`option ${option} needs a rate between 0 and 1 (or a percentage)`);
+    throw new CliError(`option ${option} needs 'new', a rate between 0 and 1, or a percentage`);
   }
   if (parsed > 1 && parsed <= 100) parsed /= 100;
-  if (parsed > 1) throw new CliError(`option ${option} needs a rate between 0 and 1`);
+  if (parsed > 1) throw new CliError(`option ${option} needs 'new' or a rate between 0 and 1`);
   return parsed;
+}
+
+function failOnValue(value, option) {
+  if (String(value).trim().toLowerCase() === 'new') return 'new';
+  return rateValue(value, option);
 }
 
 function splitOption(arg) {
@@ -119,6 +127,7 @@ function parseScanArgs(argv) {
     quarantine: null,
     failOn: null,
     minRuns: 1,
+    newWindow: 2,
     groupBy: 'auto',
     runId: null,
   };
@@ -152,11 +161,15 @@ function parseScanArgs(argv) {
     } else if (name === '--fail-on') {
       const consumed = requireValue(argv, index, name, inline);
       index = consumed.index;
-      options.failOn = rateValue(consumed.value, name);
+      options.failOn = failOnValue(consumed.value, name);
     } else if (name === '--min-runs') {
       const consumed = requireValue(argv, index, name, inline);
       index = consumed.index;
       options.minRuns = integerValue(consumed.value, name, 0);
+    } else if (name === '--new-window') {
+      const consumed = requireValue(argv, index, name, inline);
+      index = consumed.index;
+      options.newWindow = integerValue(consumed.value, name, 1);
     } else if (name === '--group-by') {
       const consumed = requireValue(argv, index, name, inline);
       index = consumed.index;
@@ -187,7 +200,7 @@ function parseScanArgs(argv) {
 }
 
 function parseExplainArgs(argv) {
-  const options = { json: false, groupBy: 'auto', runId: null };
+  const options = { json: false, newWindow: 2, groupBy: 'auto', runId: null };
   const positionals = [];
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -207,6 +220,10 @@ function parseExplainArgs(argv) {
     if (name === '--json' || name === '-j') {
       if (inline !== undefined) throw new CliError('option --json does not take a value');
       options.json = true;
+    } else if (name === '--new-window') {
+      const consumed = requireValue(argv, index, name, inline);
+      index = consumed.index;
+      options.newWindow = integerValue(consumed.value, name, 1);
     } else if (name === '--group-by') {
       const consumed = requireValue(argv, index, name, inline);
       index = consumed.index;
@@ -257,6 +274,7 @@ function runScan(options) {
   const result = scanRuns(options.runsDir, {
     groupBy: options.groupBy,
     runId: options.runId,
+    newWindow: options.newWindow,
   });
   printWarnings(result.warnings);
 
@@ -294,7 +312,26 @@ function runScan(options) {
     }
   }
 
-  if (options.failOn !== null) {
+  if (options.failOn === 'new') {
+    const offending = result.tests.filter(
+      (test) => test.trend === 'new' && test.eligibleRuns >= options.minRuns,
+    );
+    if (offending.length > 0) {
+      for (const test of offending) {
+        process.stderr.write(
+          `new flake: ${test.id} unstable since ${test.trendSince} ` +
+            `(${test.unstableRuns}/${test.eligibleRuns} runs, ` +
+            `${(test.unstableRate * 100).toFixed(1)}%)\n`,
+        );
+      }
+      process.stderr.write(
+        `flake-ledger: ${offending.length} new flake${
+          offending.length === 1 ? '' : 's'
+        } matched --fail-on new\n`,
+      );
+      if (exitCode === 0) exitCode = 1;
+    }
+  } else if (options.failOn !== null) {
     const offending = result.tests.filter(
       (test) =>
         FLAKY_CLASSIFICATIONS.has(test.classification) &&
@@ -338,6 +375,7 @@ function runExplain(options) {
   const result = scanRuns(options.runsDir, {
     groupBy: options.groupBy,
     runId: options.runId,
+    newWindow: options.newWindow,
   });
   printWarnings(result.warnings);
   const { test, matches } = findTest(result, options.query);

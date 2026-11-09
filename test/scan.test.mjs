@@ -749,3 +749,169 @@ test('identical passes in separate Playwright project suites are not retries', (
   assert.equal(record.classification, 'stable');
   assert.equal(record.timeline[0].outcome, 'passed');
 });
+
+test('scan marks new flakes apart from chronic ones in JSON, the table, and explain', (t) => {
+  const { runs } = fixture(t);
+  for (let run = 1; run <= 5; run += 1) {
+    const newlyUnstable = run >= 4;
+    const oldUnstable = run <= 2;
+    const body = [
+      testcase('pkg.TrendTest', 'newlyFlaky', newlyUnstable ? '<failure message="broke today"/>' : ''),
+      testcase('pkg.TrendTest', 'chronic', '<failure message="still red"/>'),
+      testcase('pkg.TrendTest', 'recovered', oldUnstable ? '<failure message="old"/>' : ''),
+      testcase('pkg.TrendTest', 'stable'),
+    ];
+    writeFile(runs, `run-0${run}/results.xml`, junit(body.join('\n')));
+  }
+
+  const result = scanJson(runs);
+  const newly = byId(result, 'pkg.TrendTest::newlyFlaky');
+  assert.equal(newly.classification, 'cross-run flake');
+  assert.equal(newly.trend, 'new');
+  assert.equal(newly.trendSince, 'run-04');
+
+  const chronic = byId(result, 'pkg.TrendTest::chronic');
+  assert.equal(chronic.classification, 'always-failing');
+  assert.equal(chronic.trend, 'chronic');
+  assert.equal(chronic.trendSince, 'run-01');
+
+  const recovered = byId(result, 'pkg.TrendTest::recovered');
+  assert.equal(recovered.classification, 'cross-run flake');
+  assert.equal(recovered.trend, 'recovered');
+  assert.equal(recovered.trendSince, null);
+
+  const stable = byId(result, 'pkg.TrendTest::stable');
+  assert.equal(stable.trend, 'stable');
+  assert.equal(stable.trendSince, null);
+
+  const text = runCli(['scan', runs]);
+  assert.equal(text.status, 0, text.stderr);
+  const header = text.stdout.split('\n')[0];
+  assert.match(header, /TREND/);
+  const newRow = text.stdout
+    .split('\n')
+    .find((line) => line.includes('pkg.TrendTest::newlyFlaky'));
+  assert.ok(newRow, 'the new flake row is missing');
+  assert.match(newRow, /\bnew\b\s*$/);
+
+  const explained = runCli(['explain', runs, 'pkg.TrendTest::newlyFlaky']);
+  assert.equal(explained.status, 0, explained.stderr);
+  assert.match(explained.stdout, /trend: new \(unstable period started in run-04\)/);
+});
+
+test('--fail-on new gates only new flakes while --fail-on <rate> is unchanged', (t) => {
+  const { runs } = fixture(t);
+  for (let run = 1; run <= 5; run += 1) {
+    const newlyUnstable = run >= 4;
+    const chronicUnstable = run >= 3;
+    const body = [
+      testcase('pkg.NewGateTest', 'newlyFlaky', newlyUnstable ? '<failure/>' : ''),
+      testcase('pkg.NewGateTest', 'chronic', chronicUnstable ? '<failure message="red"/>' : ''),
+    ];
+    if (run === 5) body.push(testcase('pkg.NewGateTest', 'appearedNow', '<failure/>'));
+    writeFile(runs, `run-0${run}/results.xml`, junit(body.join('\n')));
+  }
+
+  const newGate = runCli(['scan', runs, '--fail-on', 'new']);
+  assert.equal(newGate.status, 1, newGate.stderr);
+  assert.match(newGate.stderr, /pkg\.NewGateTest::newlyFlaky/);
+  assert.match(newGate.stderr, /pkg\.NewGateTest::appearedNow/);
+  assert.doesNotMatch(newGate.stderr, /pkg\.NewGateTest::chronic/);
+  assert.match(newGate.stderr, /2 new flakes matched --fail-on new/);
+
+  const rateGate = runCli(['scan', runs, '--fail-on', '0.4', '--min-runs', '2']);
+  assert.equal(rateGate.status, 1, rateGate.stderr);
+  assert.match(rateGate.stderr, /pkg\.NewGateTest::newlyFlaky/);
+  assert.match(rateGate.stderr, /pkg\.NewGateTest::chronic/);
+
+  const chronicOnly = fixture(t);
+  for (let run = 1; run <= 3; run += 1) {
+    writeFile(
+      chronicOnly.runs,
+      `run-0${run}/results.xml`,
+      junit(
+        [
+          testcase('pkg.ChronicOnlyTest', 'stable'),
+          testcase('pkg.ChronicOnlyTest', 'chronic', '<failure message="red"/>'),
+        ].join('\n'),
+      ),
+    );
+  }
+  const noNewFlakes = runCli(['scan', chronicOnly.runs, '--fail-on', 'new']);
+  assert.equal(noNewFlakes.status, 0, noNewFlakes.stderr);
+});
+
+test('--new-window controls how recent an unstable period must be to count as new', (t) => {
+  const { runs } = fixture(t);
+  for (let run = 1; run <= 5; run += 1) {
+    const body = [testcase('pkg.WindowTest', 'newAtFour', run >= 4 ? '<failure/>' : '')];
+    writeFile(runs, `run-0${run}/results.xml`, junit(body.join('\n')));
+  }
+
+  assert.equal(byId(scanJson(runs), 'pkg.WindowTest::newAtFour').trend, 'new');
+  assert.equal(
+    byId(scanJson(runs, ['--new-window', '1']), 'pkg.WindowTest::newAtFour').trend,
+    'chronic',
+  );
+  assert.equal(
+    byId(scanJson(runs, ['--new-window', '3']), 'pkg.WindowTest::newAtFour').trend,
+    'new',
+  );
+
+  const oneRunWindow = runCli(['scan', runs, '--fail-on', 'new', '--new-window', '1']);
+  assert.equal(oneRunWindow.status, 0, oneRunWindow.stderr);
+  const defaultWindow = runCli(['scan', runs, '--fail-on', 'new']);
+  assert.equal(defaultWindow.status, 1, defaultWindow.stderr);
+
+  const invalidWindow = runCli(['scan', runs, '--new-window', '0']);
+  assert.equal(invalidWindow.status, 2);
+  assert.match(invalidWindow.stderr, /must be >= 1/);
+
+  const invalidFailOn = runCli(['scan', runs, '--fail-on', 'sometimes']);
+  assert.equal(invalidFailOn.status, 2);
+  assert.match(invalidFailOn.stderr, /needs 'new'/);
+});
+
+test('a test missing from the newest run is inactive, not a new flake', (t) => {
+  const { runs } = fixture(t);
+  for (let run = 1; run <= 5; run += 1) {
+    const body = [testcase('pkg.InactiveTest', 'stable')];
+    if (run <= 4) {
+      body.push(testcase('pkg.InactiveTest', 'absentLatest', '<failure message="red"/>'));
+    }
+    writeFile(runs, `run-0${run}/results.xml`, junit(body.join('\n')));
+  }
+
+  const result = scanJson(runs);
+  const record = byId(result, 'pkg.InactiveTest::absentLatest');
+  assert.equal(record.classification, 'always-failing');
+  assert.equal(record.trend, 'inactive');
+
+  const gate = runCli(['scan', runs, '--fail-on', 'new']);
+  assert.equal(gate.status, 0, gate.stderr);
+});
+
+test('intermittent flakes stay chronic, but a failure after a green stretch is new', (t) => {
+  const { runs } = fixture(t);
+  for (let run = 1; run <= 5; run += 1) {
+    const alternatingRed = run % 2 === 1;
+    const reawakenedRed = run === 1 || run === 5;
+    const body = [
+      testcase('pkg.HistoryTest', 'alternating', alternatingRed ? '<failure/>' : ''),
+      testcase('pkg.HistoryTest', 'reawakened', reawakenedRed ? '<failure/>' : ''),
+      testcase('pkg.HistoryTest', 'green'),
+    ];
+    writeFile(runs, `run-0${run}/results.xml`, junit(body.join('\n')));
+  }
+
+  const result = scanJson(runs);
+  const alternating = byId(result, 'pkg.HistoryTest::alternating');
+  assert.equal(alternating.classification, 'cross-run flake');
+  assert.equal(alternating.trend, 'chronic');
+  assert.equal(alternating.trendSince, 'run-01');
+
+  const reawakened = byId(result, 'pkg.HistoryTest::reawakened');
+  assert.equal(reawakened.classification, 'cross-run flake');
+  assert.equal(reawakened.trend, 'new');
+  assert.equal(reawakened.trendSince, 'run-05');
+});
