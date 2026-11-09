@@ -10,7 +10,9 @@ run's JUnit XML is inspected alone and the passed-on-retry evidence is
 discarded. `flake-ledger` reads every JUnit XML under a directory, groups shards
 into CI runs, and keeps each attempt. A test that failed and then passed on
 retry stays a `passed-on-retry` row in the ledger instead of disappearing into a
-green build.
+green build. Each row also carries a trend, so a test whose instability started
+in the newest runs is marked `new` while a long-running one is `chronic`: triage
+can answer "what broke today" without rereading the whole history.
 
 ## A real session
 
@@ -48,25 +50,28 @@ rate, so a test with more evidence outranks one with a single bad run:
 
 ```console
 $ flake-ledger scan examples/runs
-TEST ID                                     RUNS  ATTEMPTS  UNSTABLE  PASS-ON-RETRY  FAILED  RATE   SCORE  CLASS
-com.example.LoginTest::rejectsExpiredToken  5     5         2         0              2       40.0%  0.118  cross-run flake
-com.example.SearchTest::filtersByPrice      5     5         2         0              2       40.0%  0.118  cross-run flake
-com.example.CheckoutTest::appliesCoupon     5     7         2         2              0       40.0%  0.118  passed-on-retry
-com.example.CartTest::addsItem              5     5         0         0              0       0.0%   0.000  stable
-com.example.ReportTest::exportsCsv          5     5         0         0              0       0.0%   0.000  skipped
+TEST ID                                     RUNS  ATTEMPTS  UNSTABLE  PASS-ON-RETRY  FAILED  RATE   SCORE  CLASS            TREND
+com.example.LoginTest::rejectsExpiredToken  5     5         2         0              2       40.0%  0.118  cross-run flake  recovered
+com.example.SearchTest::filtersByPrice      5     5         2         0              2       40.0%  0.118  cross-run flake  new
+com.example.CheckoutTest::appliesCoupon     5     7         2         2              0       40.0%  0.118  passed-on-retry  recovered
+com.example.CartTest::addsItem              5     5         0         0              0       0.0%   0.000  stable           stable
+com.example.ReportTest::exportsCsv          5     5         0         0              0       0.0%   0.000  skipped          stable
 
 5 runs, 5 tests, 27 attempts, 5 XML files.
 ```
 
 `appliesCoupon` has five runs but seven attempts and two passed-on-retry runs:
-the two red attempts are not lost. `explain` prints the timeline that produced
-the score (it prints absolute paths; they are shown here relative to the
-repository root):
+the two red attempts are not lost. `filtersByPrice` passed in the first four
+runs and failed in the newest one, so its trend is `new`;
+`rejectsExpiredToken` was unstable earlier but passed in the newest run, so it
+is `recovered`. `explain` prints the timeline that produced the score (it
+prints absolute paths; they are shown here relative to the repository root):
 
 ```console
 $ flake-ledger explain examples/runs 'com.example.CheckoutTest::appliesCoupon'
 com.example.CheckoutTest::appliesCoupon
   classification: passed-on-retry
+  trend: recovered
   runs: 5  attempts: 7  unstable: 2/5  rate: 40.0%  score: 0.118
 
   run run-01  passed-on-retry  2 attempts
@@ -115,6 +120,22 @@ com.example.CheckoutTest::appliesCoupon
 `--fail-on` and `--min-runs` are opt-in; without them the command is
 report-only and exits 0.
 
+Fail only on what broke in the newest runs, not on the chronic rows:
+
+```console
+$ flake-ledger scan examples/runs --fail-on new > /dev/null
+new flake: com.example.SearchTest::filtersByPrice unstable since run-05 (2/5 runs, 40.0%)
+flake-ledger: 1 new flake matched --fail-on new
+$ echo $?
+1
+```
+
+By default a current unstable period counts as `new` when it started in
+either of the two newest runs. Use `--new-window <n>` to widen or narrow that
+window; `--new-window 1` means only a failure that starts in the newest run is
+new. A run of non-unstable observations as long as the window ends the current
+period, so an alternating long-running flake stays `chronic`.
+
 ## Measured on real test runners
 
 The checked-in example is hand-written. To check the parser against output it
@@ -129,19 +150,20 @@ fixture directory, `flake-ledger scan runs` printed:
 
 ```console
 $ flake-ledger scan runs
-TEST ID                              RUNS  ATTEMPTS  UNSTABLE  PASS-ON-RETRY  FAILED  RATE    SCORE  CLASS
-test_checkout::test_always_failing   10    20        10        0              10      100.0%  0.722  failed-on-retry
-test_checkout::test_applies_coupon   10    20        10        10             0       100.0%  0.722  passed-on-retry
-test_checkout::test_cross_run_flake  10    10        5         0              5       50.0%   0.237  cross-run flake
-test_checkout::test_skipped          10    10        0         0              0       0.0%    0.000  skipped
-test_checkout::test_stable           10    10        0         0              0       0.0%    0.000  stable
+TEST ID                              RUNS  ATTEMPTS  UNSTABLE  PASS-ON-RETRY  FAILED  RATE    SCORE  CLASS            TREND
+test_checkout::test_always_failing   10    20        10        0              10      100.0%  0.722  failed-on-retry  chronic
+test_checkout::test_applies_coupon   10    20        10        10             0       100.0%  0.722  passed-on-retry  chronic
+test_checkout::test_cross_run_flake  10    10        5         0              5       50.0%   0.237  cross-run flake  recovered
+test_checkout::test_skipped          10    10        0         0              0       0.0%    0.000  skipped          stable
+test_checkout::test_stable           10    10        0         0              0       0.0%    0.000  stable           stable
 
 10 runs, 5 tests, 70 attempts, 10 XML files.
 ```
 
-The recovered test is `passed-on-retry` in all 10 runs, the alternating test is
-`cross-run flake` in 5 of 10, and the stable and skipped tests stay in their
-classes.
+The retry-recovered test is `passed-on-retry` in all 10 runs, the alternating
+test is `cross-run flake` in 5 of 10, and the stable and skipped tests stay in
+their classes. The alternating test passed in the newest (tenth) run, so its
+trend is `recovered`; the tests that were unstable in every run are `chronic`.
 
 Playwright's JUnit reporter writes `<flakyError>`/`<rerunError>` only when
 `includeRetries: true` is set. With that option, two projects (chromium and
@@ -149,19 +171,20 @@ firefox) and ten runs produced:
 
 ```console
 $ flake-ledger scan runs
-TEST ID                                      RUNS  ATTEMPTS  UNSTABLE  PASS-ON-RETRY  FAILED  RATE    SCORE  CLASS
-checkout.spec.js::failures › always failing  10    40        10        0              10      100.0%  0.722  always-failing
-checkout.spec.js::checkout › applies coupon  10    40        10        10             0       100.0%  0.722  passed-on-retry
-checkout.spec.js::cross-run flake            10    20        5         0              5       50.0%   0.237  cross-run flake
-checkout.spec.js::skipped                    10    20        0         0              0       0.0%    0.000  skipped
-checkout.spec.js::stable                     10    20        0         0              0       0.0%    0.000  stable
+TEST ID                                      RUNS  ATTEMPTS  UNSTABLE  PASS-ON-RETRY  FAILED  RATE    SCORE  CLASS            TREND
+checkout.spec.js::failures › always failing  10    40        10        0              10      100.0%  0.722  always-failing   chronic
+checkout.spec.js::checkout › applies coupon  10    40        10        10             0       100.0%  0.722  passed-on-retry  chronic
+checkout.spec.js::cross-run flake            10    20        5         0              5       50.0%   0.237  cross-run flake  recovered
+checkout.spec.js::skipped                    10    20        0         0              0       0.0%    0.000  skipped          stable
+checkout.spec.js::stable                     10    20        0         0              0       0.0%    0.000  stable           stable
 
 10 runs, 5 tests, 140 attempts, 10 XML files.
 ```
 
-The recovered test is `passed-on-retry` in all 10 runs. `stable` has 20 attempts
-because both projects run it, but it is still `stable`: duplicate executions in
-separate Playwright project suites are not retries.
+The retry-recovered test is `passed-on-retry` in all 10 runs. `stable` has 20
+attempts because both projects run it, but it is still `stable`: duplicate
+executions in separate Playwright project suites are not retries. The
+alternating test passed in the newest run, so its trend is `recovered`.
 
 **Playwright caveat:** with the default JUnit reporter, Playwright writes only
 the final attempt for each test, so the retry is not in the XML at all. With the
@@ -244,12 +267,21 @@ test crosses a threshold and has at least five eligible (non-skipped) runs:
 flake-ledger scan path/to/runs --quarantine flaky.txt --fail-on 0.5 --min-runs 5
 ```
 
-`--fail-on` accepts a fraction (`0.5`), a percentage (`50%`), or a whole
-percentage (`50`). Exit codes:
+Gate only on flakes whose current unstable period started recently:
 
-- `0` — report written, or no flaky test crossed `--fail-on`.
-- `1` — a flaky test crossed `--fail-on`, or `explain` matched no test or more
-  than one test.
+```sh
+flake-ledger scan path/to/runs --fail-on new
+flake-ledger scan path/to/runs --fail-on new --new-window 1
+```
+
+`--fail-on` accepts a fraction (`0.5`), a percentage (`50%`), a whole
+percentage (`50`), or `new`. A rate gates every flaky classification; `new`
+gates only rows whose `trend` is `new`. `--min-runs` applies to both forms.
+Exit codes:
+
+- `0` — report written, or no test matched `--fail-on`.
+- `1` — a flaky test crossed the rate, a new flake matched `--fail-on new`, or
+  `explain` matched no test or more than one test.
 - `2` — usage error, unreadable runs directory, or a quarantine file that
   could not be written.
 
@@ -260,8 +292,9 @@ percentage (`50`). Exit codes:
 | `--json`, `-j` | Print JSON instead of the terminal table. |
 | `--top N` | Show only the N highest-ranked tests (totals still count every test). |
 | `--quarantine <file>` | Write the ids of flaky tests, one per line. |
-| `--fail-on <rate>` | Exit 1 when a flaky test's unstable rate is at or above `<rate>`. |
+| `--fail-on <rate\|new>` | Exit 1 when a flaky test's unstable rate is at or above `<rate>`, or only when a test's trend is `new`. |
 | `--min-runs <n>` | With `--fail-on`, ignore tests with fewer than `n` eligible runs. |
+| `--new-window <n>` | Number of newest runs in which a current unstable period must start to count as `new` (default: 2). |
 | `--group-by <mode>` | `auto` (default), `file`, `parent`, or `run`; controls what counts as one run. |
 | `--run-id <id>` | Label the one run and imply `--group-by run`; useful for a single `gh run download` tree. |
 
@@ -358,12 +391,27 @@ and classifies it:
 
 Flaky classifications are `passed-on-retry`, `cross-run flake`, and
 `failed-on-retry`; those are the records written by `--quarantine` and checked
-by `--fail-on`.
+by a rate `--fail-on`. A separate `trend` field answers when the instability
+started:
+
+| Trend | Meaning |
+| --- | --- |
+| `new` | The test is unstable in the newest run, and its current unstable period started within the newest `--new-window` runs (default: 2). |
+| `chronic` | The test is unstable in the newest run, and its current period started earlier than that window, or it is intermittently unstable without a long enough non-unstable gap. |
+| `recovered` | The test has instability in its history but its newest observation was not unstable. |
+| `inactive` | The test has instability in its history but did not appear in the newest run with testcases. |
+| `stable` | The test has no unstable runs. |
+
+`--fail-on new` gates only rows whose trend is `new`, so a newly broken test
+fails CI while a long-running `chronic` known flake does not. The rate form
+`--fail-on <rate>` keeps its previous behavior and considers every flaky
+classification.
 
 The JSON output contains `totals`, `runs`, `warnings`, and one `tests` record
 per test (limited to the first N by `--top`) with its `attempts`,
 `unstableRuns`, `eligibleRuns`, `unstableRate`, Wilson `score`,
-`classification`, and `timeline`.
+`classification`, `trend`, `trendSince` (the run where the current unstable
+period began, or `null`), and `timeline`.
 
 ## Use it in CI
 
@@ -397,7 +445,10 @@ the single-artifact case, are in
 
 The command fails only when a flaky classification crosses the threshold. Keep
 the `flaky.txt` artifact or commit it if your test runner supports reading a
-quarantine list.
+quarantine list. To fail on regressions only, swap the gate for
+`--fail-on new`: chronic flakes and tests that recovered or did not run in the
+newest run will not fail the build. Run both gates if a chronic flake should
+still block CI while a separate job flags what broke today.
 
 ## FAQ
 
@@ -430,6 +481,19 @@ On a readable runs directory, this exits 1 only when a flaky classification has
 at least 10 eligible runs and an unstable rate of at least 30%; otherwise it
 exits 0. Without `--fail-on`, `scan` is report-only.
 
+**How do I fail only on what broke today?**
+Use the new-only gate:
+
+```sh
+flake-ledger scan path/to/runs --fail-on new
+```
+
+This exits 1 only for a test whose trend is `new`: unstable in the newest run,
+with the current unstable period starting in one of the newest two runs. A
+chronic flake, a test that recovered, and a test that did not run in the newest
+run all stay green. Set `--new-window <n>` if your definition of "today" spans
+more runs; add `--min-runs` if a brand-new test should also have some history.
+
 **How much history do I need?**
 One run is enough to produce a ledger, and a single run can already show
 `passed-on-retry` evidence; cross-run flakes need at least two runs. The score
@@ -441,8 +505,9 @@ enough history before `--fail-on` can fail the build.
 `npm test` builds temporary JUnit fixtures and exercises every feature above
 through the CLI: recursive scanning, shard merging, repeated testcases,
 Surefire `flakyFailure`/`rerunFailure`, retry attributes, all classifications,
-Wilson-bound table ordering, `--json`, `--top`, `--quarantine`, `explain`, and
-`--fail-on`/`--min-runs`.
+Wilson-bound table ordering, `--json`, `--top`, `--quarantine`, `explain`,
+`new`/`chronic` trends on a scripted five-run timeline, the `--new-window`
+boundary, inactive tests, and `--fail-on` (rate and `new`) with `--min-runs`.
 
 The checked-in fixture under [`examples/runs`](examples/runs) is a second,
 readable path through the same CLI: `npm run example` runs `scan`, `explain`,
