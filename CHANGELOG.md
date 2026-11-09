@@ -4,6 +4,25 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/), and each released version is a
 `v*` tag that matches the `version` in `package.json`.
 
+## [0.4.0] - 2026-11-10
+
+### Added
+
+- `scan --format github` now points each new-flake annotation at the test source
+  (`file` and, when the XML has a valid line, `line`) instead of always naming
+  the JUnit XML report, so GitHub shows the flake on the file a reviewer can
+  fix. The location comes from the newest unstable attempt's `<testcase>` or
+  failure child; an enclosing `<testsuite>` supplies the file when the reporter
+  writes it only once, and the testcase line fills in the attempts. Paths inside
+  the checkout are emitted relative to the repository root. Reports without a
+  source location keep the previous JUnit XML path, and `--json` is unchanged.
+
+### Documentation
+
+- Documented both annotation paths in the README and `docs/ci-annotations.md`:
+  the source-file annotation when the XML carries `file`/`line`, the JUnit XML
+  fallback when it does not, and the suite/testcase inheritance rules.
+
 ## [0.3.0] - 2026-11-10
 
 ### Added
