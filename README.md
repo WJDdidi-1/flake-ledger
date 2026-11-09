@@ -256,6 +256,18 @@ Machine-readable output, top 10 only:
 flake-ledger scan path/to/runs --json --top 10
 ```
 
+Report only the new flakes as GitHub Actions annotations, so they appear on the
+workflow run and pull request instead of being buried in the log:
+
+```sh
+flake-ledger scan path/to/runs --format github
+```
+
+Each test whose `trend` is `new` produces one `::warning` line naming its JUnit
+XML file and test id. Chronic, recovered, inactive, and stable tests produce no
+annotation. `--format json` is equivalent to `--json`; the JSON schema is
+unchanged.
+
 Explain one test's per-run timeline, including XML paths and failure messages:
 
 ```sh
@@ -292,7 +304,8 @@ Exit codes:
 
 | Option | Meaning |
 | --- | --- |
-| `--json`, `-j` | Print JSON instead of the terminal table. |
+| `--format <mode>` | `table` (default), `json`, or `github` for one `::warning` per new flake. |
+| `--json`, `-j` | Alias for `--format json`; print JSON instead of the terminal table. |
 | `--top N` | Show only the N highest-ranked tests (totals still count every test). |
 | `--quarantine <file>` | Write the ids of flaky tests, one per line. |
 | `--fail-on <rate\|new>` | Exit 1 when a flaky test's unstable rate is at or above `<rate>`, or only when a test's trend is `new`. |
@@ -453,6 +466,19 @@ quarantine list. To fail on regressions only, swap the gate for
 newest run will not fail the build. Run both gates if a chronic flake should
 still block CI while a separate job flags what broke today.
 
+To put the new flakes in the pull request's checks instead of only failing the
+job, emit annotations. The command below prints the warning commands and still
+exits 1 only for a new flake (remove `--fail-on new` to annotate without
+failing):
+
+```sh
+flake-ledger scan runs --format github --fail-on new
+```
+
+GitHub renders one warning per `trend: new` test with the report path and test
+id; chronic flakes are not annotated. Annotation commands go to stdout, and
+the existing parse warnings still go to stderr.
+
 ## FAQ
 
 **Do I have to install it globally?**
@@ -508,7 +534,8 @@ enough history before `--fail-on` can fail the build.
 `npm test` builds temporary JUnit fixtures and exercises every feature above
 through the CLI: recursive scanning, shard merging, repeated testcases,
 Surefire `flakyFailure`/`rerunFailure`, retry attributes, all classifications,
-Wilson-bound table ordering, `--json`, `--top`, `--quarantine`, `explain`,
+Wilson-bound table ordering, `--json`, `--format github` annotations (one per
+new flake, none for chronic rows), `--top`, `--quarantine`, `explain`,
 `new`/`chronic` trends on a scripted five-run timeline, the `--new-window`
 boundary, inactive tests, and `--fail-on` (rate and `new`) with `--min-runs`.
 

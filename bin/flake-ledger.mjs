@@ -5,6 +5,7 @@ import {
   FLAKY_CLASSIFICATIONS,
   flakyTests,
   formatExplain,
+  formatGithubAnnotations,
   formatTable,
   toJson,
 } from '../lib/report.mjs';
@@ -22,7 +23,8 @@ Usage:
   flake-ledger --version
 
 Scan options:
-  --json, -j              print machine-readable JSON instead of a table
+  --format <mode>         table (default), json, or github annotations
+  --json, -j              alias for --format json
   --top N                 show only the N highest-ranked tests
   --quarantine <file>     write the ids of flaky tests, one per line
   --fail-on <rate|new>    exit 1 on a crossed unstable rate, or only on new flakes
@@ -47,6 +49,8 @@ MVP features:
     stable.
   - Prints a table ranked by a 95% Wilson lower bound on unstable rate, with
     --json and --top N for machines.
+  - --format github emits one ::warning per new flake, naming its JUnit XML
+    file and test id; chronic flakes stay silent. --json output is unchanged.
   - --quarantine <file> writes flaky-only test ids; explain prints the per-run
     timeline with file paths and failure messages.
   - --fail-on <rate> --min-runs <n> makes CI exit 1 when a flaky test crosses
@@ -111,6 +115,16 @@ function splitOption(arg) {
   return { name: arg.slice(0, equals), inline: arg.slice(equals + 1) };
 }
 
+function parseFormat(value) {
+  const format = String(value).trim().toLowerCase();
+  if (format === 'table' || format === 'text' || format === 'terminal') return 'table';
+  if (format === 'json') return 'json';
+  if (format === 'github' || format === 'github-actions' || format === 'annotations') {
+    return 'github';
+  }
+  throw new CliError('option --format must be table, json, or github');
+}
+
 function parseGroupBy(value) {
   const mode = String(value).toLowerCase();
   if (mode === 'auto' || mode === 'dir' || mode === 'directory') return 'auto';
@@ -122,7 +136,7 @@ function parseGroupBy(value) {
 
 function parseScanArgs(argv) {
   const options = {
-    json: false,
+    format: 'table',
     top: null,
     quarantine: null,
     failOn: null,
@@ -149,7 +163,11 @@ function parseScanArgs(argv) {
     const { name, inline } = splitOption(arg);
     if (name === '--json' || name === '-j') {
       if (inline !== undefined) throw new CliError('option --json does not take a value');
-      options.json = true;
+      options.format = 'json';
+    } else if (name === '--format') {
+      const consumed = requireValue(argv, index, name, inline);
+      index = consumed.index;
+      options.format = parseFormat(consumed.value);
     } else if (name === '--top') {
       const consumed = requireValue(argv, index, name, inline);
       index = consumed.index;
@@ -279,8 +297,11 @@ function runScan(options) {
   printWarnings(result.warnings);
 
   const shown = options.top === null ? result.tests : result.tests.slice(0, options.top);
-  if (options.json) {
+  if (options.format === 'json') {
     process.stdout.write(`${JSON.stringify(toJson(result, { tests: shown, version: VERSION }), null, 2)}\n`);
+  } else if (options.format === 'github') {
+    const annotations = formatGithubAnnotations(result.tests);
+    if (annotations !== '') process.stdout.write(`${annotations}\n`);
   } else if (result.files.length === 0) {
     process.stdout.write(`No JUnit XML files found under ${result.runsDir}.\n`);
   } else if (result.tests.length === 0) {

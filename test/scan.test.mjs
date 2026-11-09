@@ -799,6 +799,68 @@ test('scan marks new flakes apart from chronic ones in JSON, the table, and expl
   assert.match(explained.stdout, /trend: new \(unstable period started in run-04\)/);
 });
 
+test('scan --format github emits one warning per new flake and keeps --json unchanged', (t) => {
+  const { runs } = fixture(t);
+  for (let run = 1; run <= 5; run += 1) {
+    const body = [
+      testcase('pkg.TrendTest', 'newlyFlaky', run >= 4 ? '<failure message="broke today"/>' : ''),
+      testcase('pkg.TrendTest', 'chronic', '<failure message="still red"/>'),
+      testcase('pkg.TrendTest', 'stable'),
+    ];
+    writeFile(runs, `run-0${run}/results.xml`, junit(body.join('\n')));
+  }
+
+  const output = runCli(['scan', runs, '--format', 'github']);
+  assert.equal(output.status, 0, output.stderr);
+  const annotations = output.stdout
+    .split('\n')
+    .filter((line) => line.startsWith('::warning '));
+  assert.equal(annotations.length, 1, output.stdout);
+  const annotation = annotations[0];
+  assert.match(annotation, /^::warning file=/);
+  assert.match(annotation, /pkg\.TrendTest::newlyFlaky/);
+  assert.ok(
+    annotation.includes(path.join(runs, 'run-05', 'results.xml').split(path.sep).join('/')),
+    `expected the newest report path in: ${annotation}`,
+  );
+  assert.doesNotMatch(annotation, /pkg\.TrendTest::chronic/);
+  assert.doesNotMatch(annotation, /pkg\.TrendTest::stable/);
+  assert.doesNotMatch(output.stdout, /TEST ID/);
+
+  const equalsForm = runCli(['scan', runs, '--format=github']);
+  assert.equal(equalsForm.status, 0, equalsForm.stderr);
+  assert.equal(equalsForm.stdout, output.stdout);
+
+  const jsonFlag = runCli(['scan', runs, '--json']);
+  const jsonFormat = runCli(['scan', runs, '--format', 'json']);
+  assert.equal(jsonFormat.status, 0, jsonFormat.stderr);
+  assert.equal(jsonFormat.stdout, jsonFlag.stdout);
+
+  const invalid = runCli(['scan', runs, '--format', 'yaml']);
+  assert.equal(invalid.status, 2);
+  assert.match(invalid.stderr, /--format must be table, json, or github/);
+});
+
+test('scan --format github stays silent when only chronic flakes exist', (t) => {
+  const { runs } = fixture(t);
+  for (let run = 1; run <= 3; run += 1) {
+    writeFile(
+      runs,
+      `run-0${run}/results.xml`,
+      junit(
+        [
+          testcase('pkg.ChronicTest', 'stable'),
+          testcase('pkg.ChronicTest', 'chronic', '<failure message="red"/>'),
+        ].join('\n'),
+      ),
+    );
+  }
+
+  const output = runCli(['scan', runs, '--format', 'github']);
+  assert.equal(output.status, 0, output.stderr);
+  assert.equal(output.stdout, '');
+});
+
 test('--fail-on new gates only new flakes while --fail-on <rate> is unchanged', (t) => {
   const { runs } = fixture(t);
   for (let run = 1; run <= 5; run += 1) {
