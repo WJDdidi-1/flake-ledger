@@ -263,13 +263,34 @@ workflow run and pull request instead of being buried in the log:
 flake-ledger scan path/to/runs --format github
 ```
 
-Each test whose `trend` is `new` produces one `::warning` line naming its JUnit
-XML file and test id. With `runs/` in the checkout, the output is:
+Each test whose `trend` is `new` produces one `::warning` line naming the test
+source when the JUnit XML records `file`/`line` on the testcase (or its failure
+child), and the JUnit XML report otherwise. With `runs/` in the checkout, the
+output is:
 
 ```console
 $ flake-ledger scan runs --format github
 ::warning file=runs/run-05/results.xml,title=flake-ledger new flake::pkg.TrendTest::newlyFlaky is a new flake: unstable since run-04 (2/5 runs, 40.0%25).
 ```
+
+When the report carries the source location, the annotation points at the test
+that is flaky instead of the artifact that recorded it:
+
+```xml
+<testcase classname="pkg.LoginTest" name="rejectsExpiredToken" file="test/login.test.ts" line="42">
+  <failure message="expected 401, got 200"/>
+</testcase>
+```
+
+```console
+$ flake-ledger scan runs --format github
+::warning file=test/login.test.ts,line=42,title=flake-ledger new flake::pkg.LoginTest::rejectsExpiredToken is a new flake: unstable since run-04 (2/5 runs, 40.0%25).
+```
+
+Source locations are made relative to the working directory when they are
+absolute, and `line` is omitted when the XML gives no usable line. Reporters
+that do not emit a source location keep the JUnit XML path, so the annotation
+remains present even when it can only point at the artifact.
 
 GitHub decodes `%25` back to `%` when rendering the warning. Chronic, recovered,
 inactive, and stable tests produce no annotation, and if there is no new flake
@@ -491,9 +512,10 @@ failing):
 flake-ledger scan runs --format github --fail-on new
 ```
 
-GitHub renders one warning per `trend: new` test with the report path and test
-id; chronic flakes are not annotated. Annotation commands go to stdout, and
-the existing parse warnings still go to stderr.
+GitHub renders one warning per `trend: new` test, anchored to the test source
+when the XML carries `file`/`line` and to the report path otherwise; chronic
+flakes are not annotated. Annotation commands go to stdout, and the existing
+parse warnings still go to stderr.
 
 ## FAQ
 

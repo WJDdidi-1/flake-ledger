@@ -49,8 +49,9 @@ MVP features:
     stable.
   - Prints a table ranked by a 95% Wilson lower bound on unstable rate, with
     --json and --top N for machines.
-  - --format github emits one ::warning per new flake, naming its JUnit XML
-    file and test id; chronic flakes stay silent. --json output is unchanged.
+  - --format github emits one ::warning per new flake, naming the test source
+    when the XML has file/line and the JUnit XML otherwise; chronic flakes
+    stay silent. --json output is unchanged.
   - --quarantine <file> writes flaky-only test ids; explain prints the per-run
     timeline with file paths and failure messages.
   - --fail-on <rate> --min-runs <n> makes CI exit 1 when a flaky test crosses

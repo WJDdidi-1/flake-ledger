@@ -861,6 +861,75 @@ test('scan --format github stays silent when only chronic flakes exist', (t) => 
   assert.equal(output.stdout, '');
 });
 
+test('scan --format github points a new flake at the test source file and line', (t) => {
+  const { runs } = fixture(t);
+  for (let run = 1; run <= 5; run += 1) {
+    const failing = run >= 4 ? '<failure message="broke today"/>' : '';
+    writeFile(
+      runs,
+      `run-0${run}/results.xml`,
+      junit(
+        `<testcase classname="pkg.LocationTest" name="newFlake" file="test/login.test.ts" line="42">${failing}</testcase>`,
+      ),
+    );
+  }
+
+  const expected =
+    '::warning file=test/login.test.ts,line=42,title=flake-ledger new flake::' +
+    'pkg.LocationTest::newFlake is a new flake: unstable since run-04 (2/5 runs, 40.0%25).';
+
+  const annotated = runCli(['scan', runs, '--format', 'github']);
+  assert.equal(annotated.status, 0, annotated.stderr);
+  assert.equal(annotated.stdout, `${expected}\n`);
+
+  const result = scanJson(runs);
+  const newestAttempt = byId(result, 'pkg.LocationTest::newFlake').timeline.at(-1).attempts.at(-1);
+  assert.equal(newestAttempt.file, 'test/login.test.ts');
+  assert.equal(newestAttempt.line, 42);
+  // The report path is still recorded separately from the source location.
+  assert.equal(newestAttempt.source, path.join(runs, 'run-05', 'results.xml'));
+});
+
+test('scan --format github emits a source file without a line and reads a failure-child location', (t) => {
+  const { runs } = fixture(t);
+  for (let run = 1; run <= 5; run += 1) {
+    const failing = run >= 4 ? '<failure message="broke today"/>' : '';
+    const source = run === 5 ? 'file="test/login.test.ts"' : '';
+    writeFile(
+      runs,
+      `run-0${run}/results.xml`,
+      junit(
+        `<testcase classname="pkg.FallbackTest" name="fileOnly" ${source}>${failing}</testcase>`,
+      ),
+    );
+  }
+
+  const output = runCli(['scan', runs, '--format', 'github']);
+  assert.equal(output.status, 0, output.stderr);
+  const annotation = output.stdout.trimEnd();
+  assert.match(annotation, /^::warning file=test\/login\.test\.ts,title=flake-ledger new flake::/);
+  assert.doesNotMatch(annotation, /,line=/);
+
+  // A location on the failure child is used when the testcase does not carry
+  // one. This is the shape some pytest-style reporters emit.
+  const childLocation = fixture(t);
+  for (let run = 1; run <= 5; run += 1) {
+    const failing =
+      run >= 4 ? '<failure message="broke today" file="test/child.test.ts" line="7"/>' : '';
+    writeFile(
+      childLocation.runs,
+      `run-0${run}/results.xml`,
+      junit(`<testcase classname="pkg.ChildLocationTest" name="newFlake">${failing}</testcase>`),
+    );
+  }
+  const childOutput = runCli(['scan', childLocation.runs, '--format', 'github']);
+  assert.equal(childOutput.status, 0, childOutput.stderr);
+  assert.match(
+    childOutput.stdout,
+    /^::warning file=test\/child\.test\.ts,line=7,title=flake-ledger new flake::/,
+  );
+});
+
 test('scan --format github emits the exact warning command for a new flake only', (t) => {
   const { runs } = fixture(t);
   for (let run = 1; run <= 5; run += 1) {
