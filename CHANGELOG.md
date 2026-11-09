@@ -27,6 +27,12 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
 
 - Documented the trend values, the new-only gate, the window boundary, and the
   new JSON fields in the README, including the effect on the checked-in example.
+- Added `docs/trend-timeline.md`, a reproducible five-run script with the exact
+  commands and output. Both tests are `cross-run flake`, but `--fail-on new`
+  exits 1 only for the test whose unstable period started in `run-04`; the test
+  that has been failing since `run-02` is `chronic` and does not match. The page
+  also shows the rate gate still seeing both rows and the `--new-window 1`
+  boundary turning the new flake chronic.
 
 ## [0.1.2] - 2026-11-09
 

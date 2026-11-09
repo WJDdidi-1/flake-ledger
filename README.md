@@ -134,7 +134,10 @@ By default a current unstable period counts as `new` when it started in
 either of the two newest runs. Use `--new-window <n>` to widen or narrow that
 window; `--new-window 1` means only a failure that starts in the newest run is
 new. A run of non-unstable observations as long as the window ends the current
-period, so an alternating long-running flake stays `chronic`.
+period, so an alternating long-running flake stays `chronic`. The reproducible
+five-run timeline behind this gate, with the exact output for a new and a
+chronic row, is in
+[`docs/trend-timeline.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/trend-timeline.md).
 
 ## Measured on real test runners
 
@@ -508,6 +511,12 @@ Surefire `flakyFailure`/`rerunFailure`, retry attributes, all classifications,
 Wilson-bound table ordering, `--json`, `--top`, `--quarantine`, `explain`,
 `new`/`chronic` trends on a scripted five-run timeline, the `--new-window`
 boundary, inactive tests, and `--fail-on` (rate and `new`) with `--min-runs`.
+
+The same new/chronic timeline is reproduced with plain shell and JUnit XML in
+[`docs/trend-timeline.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/trend-timeline.md),
+including the `--fail-on new` exit codes and a side-by-side rate gate that
+still sees both rows. Run `npm test` to check the behavior; the page is the
+readable record of what the CLI printed.
 
 The checked-in fixture under [`examples/runs`](examples/runs) is a second,
 readable path through the same CLI: `npm run example` runs `scan`, `explain`,
