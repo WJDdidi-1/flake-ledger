@@ -930,6 +930,77 @@ test('scan --format github emits a source file without a line and reads a failur
   );
 });
 
+test('scan --format github prefers the test source and falls back to the XML report', (t) => {
+  const { root, runs } = fixture(t);
+  for (let run = 1; run <= 5; run += 1) {
+    const failing = run >= 4 ? '<failure message="broke today"/>' : '';
+    writeFile(
+      runs,
+      `run-0${run}/results.xml`,
+      junit(
+        [
+          `<testcase classname="pkg.SourceTest" name="newFlake" file="test/login.test.ts" line="42">${failing}</testcase>`,
+          testcase('pkg.ReportTest', 'newFlake', failing),
+        ].join('\n'),
+      ),
+    );
+  }
+
+  const expected = [
+    '::warning file=runs/run-05/results.xml,title=flake-ledger new flake::' +
+      'pkg.ReportTest::newFlake is a new flake: unstable since run-04 (2/5 runs, 40.0%25).',
+    '::warning file=test/login.test.ts,line=42,title=flake-ledger new flake::' +
+      'pkg.SourceTest::newFlake is a new flake: unstable since run-04 (2/5 runs, 40.0%25).',
+  ].join('\n');
+
+  const output = runCli(['scan', 'runs', '--format', 'github'], { cwd: root });
+  assert.equal(output.status, 0, output.stderr);
+  assert.equal(output.stdout, `${expected}\n`);
+
+  const result = scanJson(runs);
+  const sourceAttempt = byId(result, 'pkg.SourceTest::newFlake').timeline.at(-1).attempts.at(-1);
+  assert.equal(sourceAttempt.file, 'test/login.test.ts');
+  assert.equal(sourceAttempt.line, 42);
+  assert.equal(sourceAttempt.source, path.join(runs, 'run-05', 'results.xml'));
+
+  const fallbackAttempt = byId(result, 'pkg.ReportTest::newFlake').timeline.at(-1).attempts.at(-1);
+  assert.equal(fallbackAttempt.file, null);
+  assert.equal(fallbackAttempt.line, null);
+  assert.equal(fallbackAttempt.source, path.join(runs, 'run-05', 'results.xml'));
+});
+
+test('scan --format github takes a suite file with a testcase line', (t) => {
+  const { root, runs } = fixture(t);
+  for (let run = 1; run <= 5; run += 1) {
+    const failing = run >= 4 ? '<failure message="broke today"/>' : '';
+    writeFile(
+      runs,
+      `run-0${run}/results.xml`,
+      `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pkg.SuiteLocationTest" file="test/suite.test.ts">
+    <testcase classname="pkg.SuiteLocationTest" name="newFlake" line="7">${failing}</testcase>
+  </testsuite>
+</testsuites>
+`,
+    );
+  }
+
+  const output = runCli(['scan', 'runs', '--format', 'github'], { cwd: root });
+  assert.equal(output.status, 0, output.stderr);
+  assert.equal(
+    output.stdout,
+    '::warning file=test/suite.test.ts,line=7,title=flake-ledger new flake::' +
+      'pkg.SuiteLocationTest::newFlake is a new flake: unstable since run-04 (2/5 runs, 40.0%25).\n',
+  );
+
+  const attempt = byId(scanJson(runs), 'pkg.SuiteLocationTest::newFlake')
+    .timeline.at(-1)
+    .attempts.at(-1);
+  assert.equal(attempt.file, 'test/suite.test.ts');
+  assert.equal(attempt.line, 7);
+});
+
 test('scan --format github emits the exact warning command for a new flake only', (t) => {
   const { runs } = fixture(t);
   for (let run = 1; run <= 5; run += 1) {

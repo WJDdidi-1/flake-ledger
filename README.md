@@ -263,10 +263,12 @@ workflow run and pull request instead of being buried in the log:
 flake-ledger scan path/to/runs --format github
 ```
 
-Each test whose `trend` is `new` produces one `::warning` line naming the test
-source when the JUnit XML records `file`/`line` on the testcase (or its failure
-child), and the JUnit XML report otherwise. With `runs/` in the checkout, the
-output is:
+Each test whose `trend` is `new` produces one `::warning` line. When the JUnit
+XML records a source location (`file`/`line` on the testcase, its failure child,
+or its testsuite), the annotation names that test file, so GitHub shows it on
+the test that is flaky instead of on the build artifact. When the XML carries no
+source location, the annotation falls back to the newest JUnit XML report path.
+With `runs/` in the checkout and no source location in the XML, the output is:
 
 ```console
 $ flake-ledger scan runs --format github
@@ -287,10 +289,12 @@ $ flake-ledger scan runs --format github
 ::warning file=test/login.test.ts,line=42,title=flake-ledger new flake::pkg.LoginTest::rejectsExpiredToken is a new flake: unstable since run-04 (2/5 runs, 40.0%25).
 ```
 
-Source locations are made relative to the working directory when they are
-absolute, and `line` is omitted when the XML gives no usable line. Reporters
-that do not emit a source location keep the JUnit XML path, so the annotation
-remains present even when it can only point at the artifact.
+When the XML carries `file`/`line`, the source file is what GitHub shows; the
+JUnit XML path is used only when no source location is available. Source
+locations are made relative to the working directory when they are absolute, and
+`line` is omitted when the XML gives no usable line. Reporters that do not emit
+a source location keep the JUnit XML path, so the annotation remains present
+even when it can only point at the artifact.
 
 GitHub decodes `%25` back to `%` when rendering the warning. Chronic, recovered,
 inactive, and stable tests produce no annotation, and if there is no new flake
@@ -573,10 +577,12 @@ enough history before `--fail-on` can fail the build.
 through the CLI: recursive scanning, shard merging, repeated testcases,
 Surefire `flakyFailure`/`rerunFailure`, retry attributes, all classifications,
 Wilson-bound table ordering, `--json`, `--format github` annotations (the exact
-`::warning` command, one per new flake, none for chronic rows, and escaping of
-workflow-command delimiters), `--top`, `--quarantine`, `explain`,
-`new`/`chronic` trends on a scripted five-run timeline, the `--new-window`
-boundary, inactive tests, and `--fail-on` (rate and `new`) with `--min-runs`.
+`::warning` command, the source-file location when the XML carries `file`/`line`,
+the report-path fallback when it does not, one per new flake, none for chronic
+rows, and escaping of workflow-command delimiters), `--top`, `--quarantine`,
+`explain`, `new`/`chronic` trends on a scripted five-run timeline, the
+`--new-window` boundary, inactive tests, and `--fail-on` (rate and `new`) with
+`--min-runs`.
 
 The same new/chronic timeline is reproduced with plain shell and JUnit XML in
 [`docs/trend-timeline.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/trend-timeline.md),
