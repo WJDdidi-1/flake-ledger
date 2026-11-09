@@ -861,6 +861,60 @@ test('scan --format github stays silent when only chronic flakes exist', (t) => 
   assert.equal(output.stdout, '');
 });
 
+test('scan --format github emits the exact warning command for a new flake only', (t) => {
+  const { runs } = fixture(t);
+  for (let run = 1; run <= 5; run += 1) {
+    const body = [
+      testcase('pkg.AnnotationTest', 'newFlake', run >= 4 ? '<failure message="broke today"/>' : ''),
+      testcase('pkg.AnnotationTest', 'chronic', '<failure message="still red"/>'),
+    ];
+    writeFile(runs, `run-0${run}/results.xml`, junit(body.join('\n')));
+  }
+
+  const reportFile = path.join(runs, 'run-05', 'results.xml').split(path.sep).join('/');
+  const expected =
+    `::warning file=${reportFile},title=flake-ledger new flake::` +
+    'pkg.AnnotationTest::newFlake is a new flake: unstable since run-04 (2/5 runs, 40.0%25).';
+
+  const annotated = runCli(['scan', runs, '--format', 'github']);
+  assert.equal(annotated.status, 0, annotated.stderr);
+  assert.equal(annotated.stdout, `${expected}\n`);
+  assert.doesNotMatch(annotated.stdout, /pkg\.AnnotationTest::chronic/);
+
+  // Annotations alone are report-only; the separate new-only gate is what
+  // makes the job fail while keeping the annotation on the pull request.
+  const gated = runCli(['scan', runs, '--format', 'github', '--fail-on', 'new']);
+  assert.equal(gated.status, 1, gated.stderr);
+  assert.equal(gated.stdout, `${expected}\n`);
+  assert.match(gated.stderr, /1 new flake matched --fail-on new/);
+  assert.doesNotMatch(gated.stdout, /pkg\.AnnotationTest::chronic/);
+});
+
+test('scan --format github escapes workflow command data and properties', (t) => {
+  const { runs } = fixture(t);
+  // A comma and a percent in the report path exercise property escaping; a
+  // newline and a percent in the test id exercise data escaping. Without
+  // escaping, the newline would start a second workflow command.
+  for (let run = 1; run <= 5; run += 1) {
+    writeFile(
+      runs,
+      `run-0${run}/100%,results/results.xml`,
+      junit(testcase('pkg.Weird,Test:100%', 'new&#10;flake', run >= 4 ? '<failure/>' : '')),
+    );
+  }
+
+  const output = runCli(['scan', runs, '--format', 'github']);
+  assert.equal(output.status, 0, output.stderr);
+  const annotation = output.stdout.trimEnd();
+  assert.equal(annotation.split('\n').length, 1, output.stdout);
+  assert.match(
+    annotation,
+    /^::warning file=.*100%25%2Cresults\/results\.xml,title=flake-ledger new flake::/,
+  );
+  assert.match(annotation, /::pkg\.Weird,Test:100%25::new%0Aflake is a new flake:/);
+  assert.doesNotMatch(annotation, /\n/);
+});
+
 test('--fail-on new gates only new flakes while --fail-on <rate> is unchanged', (t) => {
   const { runs } = fixture(t);
   for (let run = 1; run <= 5; run += 1) {
