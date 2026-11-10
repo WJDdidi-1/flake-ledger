@@ -7,6 +7,11 @@ and `attemptCount`: there is no per-run unstable count or rate and no
 suite-level direction. A team asking "is our flakiness getting worse?" still
 has to walk the per-test timelines itself.
 
+This page remains the published-0.4.0 baseline. The follow-up milestone is
+verified in
+[`suite-trend-clean-install.md`](suite-trend-clean-install.md), which installs
+the packed tarball and records the new per-run and suite fields.
+
 Measured on 2026-11-10 with Node.js 24.15.0 and the published
 `flake-ledger@0.4.0` package installed from npm into a temporary prefix. The
 fixture is plain JUnit XML, so no test runner is needed to reproduce it.
@@ -248,9 +253,11 @@ does not emit:
 | run-04 | 5 | 5 | 3 | 60.0% |
 | run-05 | 5 | 5 | 4 | 80.0% |
 
-That is the gap the next milestone has to close: per-run flaky/unstable counts
-and rates, plus a suite-level direction that summarizes this ordered series.
-The fixture and the measurement above are the baseline for that change.
+That is the gap the next milestone closed: per-run flaky/unstable counts and
+rates, plus a suite-level direction that summarizes this ordered series. The
+fixture and the measurement above remain the baseline for that change, and
+[`suite-trend-clean-install.md`](suite-trend-clean-install.md) records the
+clean-install verification of the new fields.
 
 ## Full raw output
 

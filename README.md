@@ -58,7 +58,18 @@ com.example.CartTest::addsItem              5     5         0         0         
 com.example.ReportTest::exportsCsv          5     5         0         0              0       0.0%   0.000  skipped          stable
 
 5 runs, 5 tests, 27 attempts, 5 XML files.
+Suite trend: improving (first window 30.0%, last window 20.0%).
 ```
+
+The last line is the suite direction. Each run also carries `unstableTests`,
+`flakyRate`, and `newFlakes`, so the five-run series is visible without walking
+the per-test timelines. Here the rates are 40.0%, 20.0%, 20.0%, 20.0%, and
+20.0%. With five runs the comparison averages the first two runs (30.0%) and
+the last two (20.0%), leaving the middle run out; the last window is lower, so
+the suite is `improving`. The `TREND` column is a different question: it says
+whether an individual test's current unstable period is `new` or `chronic`.
+The [suite trend section](#suite-trend) explains the window calculation and the
+JSON fields.
 
 `appliesCoupon` has five runs but seven attempts and two passed-on-retry runs:
 the two red attempts are not lost. `filtersByPrice` passed in the first four
@@ -464,8 +475,57 @@ fails CI while a long-running `chronic` known flake does not. The rate form
 `--fail-on <rate>` keeps its previous behavior and considers every flaky
 classification.
 
-The JSON output contains `totals`, `runs`, `warnings`, and one `tests` record
-per test (limited to the first N by `--top`) with its `attempts`,
+### Suite trend
+
+Every `runs[]` record keeps `testCount` and `attemptCount` and adds the
+flakiness signal for that run:
+
+| Field | Meaning |
+| --- | --- |
+| `unstableTests` | Number of tests whose outcome in the run is unstable (`failed`, `error`, `passed-on-retry`, or `failed-on-retry`). |
+| `flakyRate` | `unstableTests / testCount`, or `0` when the run has no testcases. |
+| `newFlakes` | Number of tests whose current unstable period started in that run, using the same `--new-window` gap rule as the per-test `trend`. |
+
+The top-level `suite` object summarizes the series:
+
+```json
+"suite": {
+  "trend": "improving",
+  "firstWindowRate": 0.30000000000000004,
+  "lastWindowRate": 0.2
+}
+```
+
+The table prints the same values with one decimal place:
+
+```text
+Suite trend: improving (first window 30.0%, last window 20.0%).
+```
+
+The comparison is deterministic:
+
+1. Order the runs as `scan` prints them (by `<testsuite>` timestamp when both
+   runs have one, otherwise by run id then path) and ignore runs with no
+   testcases.
+2. Set `windowSize = max(1, floor(observedRuns / 2))`.
+3. Average `flakyRate` over the first `windowSize` runs and the last
+   `windowSize` runs. When the run count is odd, the middle run is in neither
+   window.
+4. Report `worsening` when the last average is higher than the first by more
+   than `1e-9`, `improving` when it is lower by more than `1e-9`, and `flat`
+   otherwise. A single run makes both windows that run, so it is `flat`; no
+   observed runs is also `flat` with both rates `0`.
+
+For the five-run example the window size is two: the first window averages
+`40.0%` and `20.0%` to `30.0%`, and the last window averages `20.0%` and
+`20.0%` to `20.0%`; `run-03` is the middle run and is not counted. The windows
+are based on the number of runs, so `--new-window` does not change them; that
+option only controls whether an individual test is `new` or `chronic`.
+`newFlakes` is a separate "what started here" counter and does not feed the
+suite direction.
+
+The JSON output contains `totals`, `runs`, `warnings`, `suite`, and one `tests`
+record per test (limited to the first N by `--top`) with its `attempts`,
 `unstableRuns`, `eligibleRuns`, `unstableRate`, Wilson `score`,
 `classification`, `trend`, `trendSince` (the run where the current unstable
 period began, or `null`), and `timeline`.
@@ -581,8 +641,11 @@ Wilson-bound table ordering, `--json`, `--format github` annotations (the exact
 the report-path fallback when it does not, one per new flake, none for chronic
 rows, and escaping of workflow-command delimiters), `--top`, `--quarantine`,
 `explain`, `new`/`chronic` trends on a scripted five-run timeline, the
-`--new-window` boundary, inactive tests, and `--fail-on` (rate and `new`) with
-`--min-runs`.
+`--new-window` boundary, inactive tests, `--fail-on` (rate and `new`) with
+`--min-runs`, and the per-run unstable counts/rates plus worsening, improving,
+and flat suite directions. One regression test runs the CLI against the
+checked-in five-run fixture and asserts the summary line and JSON fields shown
+above.
 
 The same new/chronic timeline is reproduced with plain shell and JUnit XML in
 [`docs/trend-timeline.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/trend-timeline.md),
@@ -600,6 +663,14 @@ The checked-in fixture under [`examples/runs`](examples/runs) is a second,
 readable path through the same CLI: `npm run example` runs `scan`, `explain`,
 `--quarantine`, and the CI gate against it, and exits nonzero if the table,
 timeline, quarantine list, or exit codes change.
+
+The suite trend also has a clean-install record in
+[`docs/validation/suite-trend-clean-install.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/validation/suite-trend-clean-install.md):
+a local `npm pack` tarball is installed into an empty directory, then the
+installed binary reproduces the summary line and the `runs[].unstableTests`,
+`runs[].flakyRate`, `runs[].newFlakes`, and `suite` fields on the same
+five-run fixture. The page also works through the first/last window
+calculation.
 
 The real-runner measurement in [`docs/real-world.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/real-world.md)
 records the exact commands and output from pytest-rerunfailures and Playwright,
