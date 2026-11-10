@@ -51,7 +51,10 @@ MVP features:
     --json and --top N for machines.
   - --format github emits one ::warning per new flake, naming the test source
     when the XML has file/line and the JUnit XML otherwise; chronic flakes
-    stay silent. --json output is unchanged.
+    stay silent.
+  - Every --json run reports unstableTests, flakyRate, and newFlakes, and the
+    suite block (plus one table summary line) compares the first and last run
+    windows as improving, worsening, or flat.
   - --quarantine <file> writes flaky-only test ids; explain prints the per-run
     timeline with file paths and failure messages.
   - --fail-on <rate> --min-runs <n> makes CI exit 1 when a flaky test crosses
@@ -316,6 +319,7 @@ function runScan(options) {
       `${formatTable(shown, {
         totals: result.totals,
         totalTests: result.tests.length,
+        suite: result.suite,
       })}\n`,
     );
   }

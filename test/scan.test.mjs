@@ -1171,3 +1171,115 @@ test('intermittent flakes stay chronic, but a failure after a green stretch is n
   assert.equal(reawakened.trend, 'new');
   assert.equal(reawakened.trendSince, 'run-05');
 });
+
+test('scan reports a worsening suite with per-run flaky rates and new flakes', (t) => {
+  const { runs } = fixture(t);
+  const names = ['t1', 't2', 't3', 't4'];
+  for (let run = 1; run <= 5; run += 1) {
+    const body = names.map((name, index) =>
+      testcase('pkg.SuiteTrendTest', name, index < run - 1 ? '<failure message="red"/>' : ''),
+    );
+    writeFile(runs, `run-0${run}/results.xml`, junit(body.join('\n')));
+  }
+
+  const result = scanJson(runs);
+  assert.deepEqual(result.runs.map((run) => run.unstableTests), [0, 1, 2, 3, 4]);
+  assert.deepEqual(result.runs.map((run) => run.flakyRate), [0, 0.25, 0.5, 0.75, 1]);
+  assert.deepEqual(result.runs.map((run) => run.newFlakes), [0, 1, 1, 1, 1]);
+  assert.equal(result.suite.trend, 'worsening');
+  assert.equal(result.suite.firstWindowRate, 0.125);
+  assert.equal(result.suite.lastWindowRate, 0.875);
+
+  const text = runCli(['scan', runs]);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(
+    text.stdout,
+    /Suite trend: worsening \(first window 12\.5%, last window 87\.5%\)\./,
+  );
+
+  // The new suite fields must not change the existing new-only gate.
+  const gate = runCli(['scan', runs, '--fail-on', 'new']);
+  assert.equal(gate.status, 1, gate.stderr);
+  assert.match(gate.stderr, /2 new flakes matched --fail-on new/);
+});
+
+test('scan reports an improving suite', (t) => {
+  const { runs } = fixture(t);
+  const names = ['t1', 't2', 't3', 't4'];
+  for (let run = 1; run <= 5; run += 1) {
+    const body = names.map((name, index) =>
+      testcase('pkg.ImprovingTest', name, index < 5 - run ? '<failure message="red"/>' : ''),
+    );
+    writeFile(runs, `run-0${run}/results.xml`, junit(body.join('\n')));
+  }
+
+  const result = scanJson(runs);
+  assert.deepEqual(result.runs.map((run) => run.unstableTests), [4, 3, 2, 1, 0]);
+  assert.deepEqual(result.runs.map((run) => run.flakyRate), [1, 0.75, 0.5, 0.25, 0]);
+  assert.deepEqual(result.runs.map((run) => run.newFlakes), [4, 0, 0, 0, 0]);
+  assert.equal(result.suite.trend, 'improving');
+  assert.equal(result.suite.firstWindowRate, 0.875);
+  assert.equal(result.suite.lastWindowRate, 0.125);
+
+  const text = runCli(['scan', runs]);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(
+    text.stdout,
+    /Suite trend: improving \(first window 87\.5%, last window 12\.5%\)\./,
+  );
+});
+
+test('scan reports a flat suite when the per-run flaky rate does not move', (t) => {
+  const { runs } = fixture(t);
+  for (let run = 1; run <= 5; run += 1) {
+    writeFile(
+      runs,
+      `run-0${run}/results.xml`,
+      junit(
+        [
+          testcase('pkg.FlatTest', 'chronic', '<failure message="always red"/>'),
+          testcase('pkg.FlatTest', 'stable'),
+        ].join('\n'),
+      ),
+    );
+  }
+
+  const result = scanJson(runs);
+  assert.deepEqual(result.runs.map((run) => run.unstableTests), [1, 1, 1, 1, 1]);
+  assert.deepEqual(result.runs.map((run) => run.flakyRate), [0.5, 0.5, 0.5, 0.5, 0.5]);
+  assert.deepEqual(result.runs.map((run) => run.newFlakes), [1, 0, 0, 0, 0]);
+  assert.equal(result.suite.trend, 'flat');
+  assert.equal(result.suite.firstWindowRate, 0.5);
+  assert.equal(result.suite.lastWindowRate, 0.5);
+
+  const text = runCli(['scan', runs]);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /Suite trend: flat \(first window 50\.0%, last window 50\.0%\)\./);
+});
+
+test('a single-run directory reports its own rate and no direction', (t) => {
+  const { runs } = fixture(t);
+  writeFile(
+    runs,
+    'run-only/results.xml',
+    junit(
+      [
+        testcase('pkg.SingleRunTest', 'flaky', '<failure message="red"/>'),
+        testcase('pkg.SingleRunTest', 'stable'),
+      ].join('\n'),
+    ),
+  );
+
+  const result = scanJson(runs);
+  assert.equal(result.runs.length, 1);
+  assert.equal(result.runs[0].unstableTests, 1);
+  assert.equal(result.runs[0].flakyRate, 0.5);
+  assert.equal(result.runs[0].newFlakes, 1);
+  assert.equal(result.suite.trend, 'flat');
+  assert.equal(result.suite.firstWindowRate, 0.5);
+  assert.equal(result.suite.lastWindowRate, 0.5);
+
+  const text = runCli(['scan', runs]);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /Suite trend: flat \(first window 50\.0%, last window 50\.0%\)\./);
+});
