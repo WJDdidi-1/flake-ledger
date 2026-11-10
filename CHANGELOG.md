@@ -4,7 +4,17 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/), and each released version is a
 `v*` tag that matches the `version` in `package.json`.
 
-## [Unreleased]
+## [0.5.0] - 2026-11-11
+
+### Added
+
+- `scan --json` now reports flakiness per run: each `runs[]` entry gains
+  `unstableTests`, `flakyRate`, and `newFlakes`. The top-level `suite` object
+  adds `trend` (`improving`, `worsening`, or `flat`) plus `firstWindowRate` and
+  `lastWindowRate`, comparing the first and last halves of the observed runs.
+  The terminal table shows the same comparison as one `Suite trend:` summary
+  line. Runs without testcases are left out of the comparison, and a single
+  observed run is `flat` because there is no earlier point to compare against.
 
 ### Documentation
 
