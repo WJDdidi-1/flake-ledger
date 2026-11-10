@@ -4,6 +4,16 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/), and each released version is a
 `v*` tag that matches the `version` in `package.json`.
 
+## [Unreleased]
+
+### Documentation
+
+- Added `docs/validation/suite-trend-0.4.0.md`, recording the published 0.4.0
+  `scan runs --json` output on a five-run fixture whose unstable test count
+  rises from 0 to 4. The per-run objects expose only `testCount` and
+  `attemptCount`; no per-run unstable count or rate and no suite-level trend is
+  present, which is the baseline for the next milestone.
+
 ## [0.4.0] - 2026-11-10
 
 ### Added
