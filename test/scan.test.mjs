@@ -1283,3 +1283,23 @@ test('a single-run directory reports its own rate and no direction', (t) => {
   assert.equal(text.status, 0, text.stderr);
   assert.match(text.stdout, /Suite trend: flat \(first window 50\.0%, last window 50\.0%\)\./);
 });
+
+test('the checked-in five-run example matches the documented suite summary and JSON', () => {
+  const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const runs = path.join(repoRoot, 'examples', 'runs');
+
+  const result = scanJson(runs);
+  assert.deepEqual(result.runs.map((run) => run.unstableTests), [2, 1, 1, 1, 1]);
+  assert.deepEqual(result.runs.map((run) => run.flakyRate), [0.4, 0.2, 0.2, 0.2, 0.2]);
+  assert.deepEqual(result.runs.map((run) => run.newFlakes), [2, 1, 0, 1, 1]);
+  assert.equal(result.suite.trend, 'improving');
+  assert.equal(result.suite.firstWindowRate, 0.30000000000000004);
+  assert.equal(result.suite.lastWindowRate, 0.2);
+
+  const text = runCli(['scan', runs]);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(
+    text.stdout,
+    /Suite trend: improving \(first window 30\.0%, last window 20\.0%\)\./,
+  );
+});

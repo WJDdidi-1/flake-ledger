@@ -13,6 +13,15 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
   rises from 0 to 4. The per-run objects expose only `testCount` and
   `attemptCount`; no per-run unstable count or rate and no suite-level trend is
   present, which is the baseline for the next milestone.
+- Documented the suite trend in the README: the summary line is shown verbatim,
+  the per-run `unstableTests`, `flakyRate`, and `newFlakes` fields are
+  described, and the first/last window comparison is explained, including the
+  middle run being omitted when the run count is odd.
+- Added `docs/validation/suite-trend-clean-install.md`, which packs the
+  unreleased tree with `npm pack`, installs the tarball into an empty
+  directory, and reproduces the README summary line plus the per-run and suite
+  JSON fields on the checked-in five-run fixture. A regression test now pins
+  those values against the same fixture.
 
 ## [0.4.0] - 2026-11-10
 
