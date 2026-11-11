@@ -32,6 +32,12 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
   directory, and reproduces the README summary line plus the per-run and suite
   JSON fields on the checked-in five-run fixture. A regression test now pins
   those values against the same fixture.
+- Added `docs/validation/quarantine-review-0.5.0.md`, recording that the
+  published 0.5.0 CLI writes `--quarantine` ids but has no command that reads
+  the file back: `--help` lists only `scan` and `explain`, and two subsequent
+  all-green runs leave `q.txt` unchanged with no staleness signal. Because the
+  writer selects the lifetime `cross-run flake` classification, re-running it
+  also rewrites the same ids, so the file cannot expire on its own.
 
 ## [0.4.0] - 2026-11-10
 
