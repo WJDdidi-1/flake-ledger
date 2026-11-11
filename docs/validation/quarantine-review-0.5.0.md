@@ -346,6 +346,12 @@ non-unstable eligible runs since the last unstable one, report tests that meet
 a documented threshold, and call out ids that no longer appear in the runs at
 all. Until then, an id in `q.txt` is a write-only reminder.
 
+That follow-up is now recorded in
+[`quarantine-review-clean-install.md`](quarantine-review-clean-install.md):
+the unreleased tree adds `review <quarantine-file> <runs-dir>`, and the page
+reproduces the release and keep lines plus the JSON from a clean `npm pack` +
+install on the same fixture extended with three all-green runs.
+
 ## Reproduce it
 
 The fixture is plain JUnit XML, so no test runner is required. The steps above

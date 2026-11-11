@@ -4,6 +4,33 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/), and each released version is a
 `v*` tag that matches the `version` in `package.json`.
 
+## [Unreleased]
+
+### Added
+
+- `review <quarantine-file> <runs-dir>` reads the ids written by
+  `scan --quarantine` and says which can come back. It counts the consecutive
+  newest observed runs in which each id passed without retry evidence and
+  releases the id once that streak reaches `--stable-for` (default 5).
+  Still-unstable, skipped, and missing observations keep it; ids that no
+  longer appear are reported as unknown. `--json` exposes `stableFor`,
+  `runsObserved`, `summary`, `released`, `kept`, `unknown`, and the
+  `results`/`tests` aliases.
+
+### Documentation
+
+- Documented the quarantine-review loop in the README with real output on the
+  checked-in five-run example extended with three all-green runs: write the
+  file with `scan --quarantine`, keep collecting runs after the fix, then run
+  `review` to release ids with enough clean runs and keep the rest. The section
+  covers `--stable-for`, the JSON shape, the report-only exit behavior, and
+  that `review` never rewrites the quarantine file.
+- Added `docs/validation/quarantine-review-clean-install.md`, which packs the
+  unreleased tree with `npm pack`, installs the tarball into an empty
+  directory, writes a quarantine file with the installed binary, appends three
+  green runs, and reproduces the documented release line and review JSON. A
+  regression test now pins those values against the same fixture.
+
 ## [0.5.0] - 2026-11-11
 
 ### Added
