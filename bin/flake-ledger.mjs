@@ -2,6 +2,14 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { scanRuns, ScanError } from '../lib/scan.mjs';
 import {
+  DEFAULT_STABLE_FOR,
+  formatReview,
+  readQuarantine,
+  reviewQuarantine,
+  ReviewError,
+  toReviewJson,
+} from '../lib/review.mjs';
+import {
   FLAKY_CLASSIFICATIONS,
   flakyTests,
   formatExplain,
@@ -19,8 +27,15 @@ const USAGE = `flake-ledger: rank flaky tests from JUnit XML across CI runs
 Usage:
   flake-ledger scan <runs-dir> [options]
   flake-ledger explain <runs-dir> <test-id> [--json]
+  flake-ledger review <quarantine-file> <runs-dir> [options]
   flake-ledger --help
   flake-ledger --version
+
+Review options:
+  --stable-for N          consecutive newest runs without a failure (default: 5)
+  --json, -j              print released, kept, and unknown ids as JSON
+  --group-by <mode>       auto (default), file, parent, or run
+  --run-id <id>           label the single run; implies --group-by run
 
 Scan options:
   --format <mode>         table (default), json, or github annotations
@@ -57,6 +72,8 @@ MVP features:
     windows as improving, worsening, or flat.
   - --quarantine <file> writes flaky-only test ids; explain prints the per-run
     timeline with file paths and failure messages.
+  - review reads that file back and releases the ids with no failure in the
+    newest --stable-for runs, while printing kept and unknown ids.
   - --fail-on <rate> --min-runs <n> makes CI exit 1 when a flaky test crosses
     the threshold; --fail-on new fails only on flakes whose current unstable
     period started within the newest --new-window runs. The default stays
@@ -281,6 +298,66 @@ function parseExplainArgs(argv) {
   return options;
 }
 
+function parseReviewArgs(argv) {
+  const options = {
+    json: false,
+    stableFor: DEFAULT_STABLE_FOR,
+    groupBy: 'auto',
+    runId: null,
+  };
+  const positionals = [];
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--') {
+      positionals.push(...argv.slice(index + 1));
+      break;
+    }
+    if (arg === '-h' || arg === '--help') throw new HelpRequest();
+    if (arg === '-v' || arg === '--version') throw new VersionRequest();
+    if (!arg.startsWith('-') || arg === '-') {
+      positionals.push(arg);
+      continue;
+    }
+
+    const { name, inline } = splitOption(arg);
+    if (name === '--json' || name === '-j') {
+      if (inline !== undefined) throw new CliError('option --json does not take a value');
+      options.json = true;
+    } else if (name === '--stable-for') {
+      const consumed = requireValue(argv, index, name, inline);
+      index = consumed.index;
+      options.stableFor = integerValue(consumed.value, name, 1);
+    } else if (name === '--group-by') {
+      const consumed = requireValue(argv, index, name, inline);
+      index = consumed.index;
+      options.groupBy = parseGroupBy(consumed.value);
+    } else if (name === '--run-id') {
+      const consumed = requireValue(argv, index, name, inline);
+      index = consumed.index;
+      options.runId = consumed.value;
+    } else {
+      throw new CliError(`unknown option ${arg}`);
+    }
+  }
+
+  if (options.runId !== null) {
+    if (options.runId.trim() === '') {
+      throw new CliError('option --run-id needs a non-empty value');
+    }
+    if (options.groupBy === 'auto') options.groupBy = 'run';
+    else if (options.groupBy !== 'run') {
+      throw new CliError('option --run-id can only be used with --group-by run');
+    }
+  }
+  if (positionals.length !== 2) {
+    throw new CliError('review needs a <quarantine-file> and a <runs-dir>');
+  }
+  options.quarantineFile = positionals[0];
+  options.runsDir = positionals[1];
+  return options;
+}
+
 function printWarnings(warnings) {
   for (const warning of warnings) {
     process.stderr.write(`warning: ${warning.message}\n`);
@@ -441,6 +518,35 @@ function runExplain(options) {
   return 0;
 }
 
+function runReview(options) {
+  const ids = readQuarantine(options.quarantineFile);
+  const result = scanRuns(options.runsDir, {
+    groupBy: options.groupBy,
+    runId: options.runId,
+  });
+  printWarnings(result.warnings);
+
+  const review = reviewQuarantine(ids, result, { stableFor: options.stableFor });
+  if (options.json) {
+    process.stdout.write(
+      `${JSON.stringify(
+        toReviewJson(review, {
+          version: VERSION,
+          quarantineFile: options.quarantineFile,
+          runsDir: result.runsDir,
+          warnings: result.warnings,
+        }),
+        null,
+        2,
+      )}\n`,
+    );
+  } else {
+    const output = formatReview(review);
+    if (output !== '') process.stdout.write(`${output}\n`);
+  }
+  return 0;
+}
+
 function main() {
   const argv = process.argv.slice(2);
   if (argv.length === 0) {
@@ -461,6 +567,7 @@ function main() {
   try {
     if (command === 'scan') return runScan(parseScanArgs(argv.slice(1)));
     if (command === 'explain') return runExplain(parseExplainArgs(argv.slice(1)));
+    if (command === 'review') return runReview(parseReviewArgs(argv.slice(1)));
     throw new CliError(`unknown command ${JSON.stringify(command)}; try --help`);
   } catch (error) {
     if (error instanceof HelpRequest) {
@@ -471,7 +578,7 @@ function main() {
       process.stdout.write(`${VERSION}\n`);
       return 0;
     }
-    if (error instanceof ScanError) {
+    if (error instanceof ScanError || error instanceof ReviewError) {
       process.stderr.write(`flake-ledger: ${error.message}\n`);
       return 2;
     }
