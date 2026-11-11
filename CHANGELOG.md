@@ -4,7 +4,7 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/), and each released version is a
 `v*` tag that matches the `version` in `package.json`.
 
-## [Unreleased]
+## [0.6.0] - 2026-11-12
 
 ### Added
 
