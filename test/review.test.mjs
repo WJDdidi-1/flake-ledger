@@ -1,7 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +46,29 @@ function testcase(name, body = '') {
 
 function writeRun(runs, run, body) {
   return writeFile(runs, `${run}/results.xml`, junit(`2026-02-${run.slice(-2)}T10:00:00`, body));
+}
+
+function exampleGreenRun(run) {
+  const timestamp = `2026-01-0${run}T10:40:00`;
+  const tests = [
+    ['CheckoutTest', 'appliesCoupon', ''],
+    ['LoginTest', 'rejectsExpiredToken', ''],
+    ['SearchTest', 'filtersByPrice', ''],
+    ['CartTest', 'addsItem', ''],
+    ['ReportTest', 'exportsCsv', '<skipped message="CSV export not configured"/>'],
+  ];
+  const suites = tests
+    .map(
+      ([classname, name, body]) => `  <testsuite name="com.example.${classname}" timestamp="${timestamp}">
+    <testcase classname="com.example.${classname}" name="${name}">${body}</testcase>
+  </testsuite>`,
+    )
+    .join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+${suites}
+</testsuites>
+`;
 }
 
 function runCli(args, options = {}) {
@@ -200,6 +230,88 @@ test('review reads the file written by scan --quarantine and releases only stale
   );
   assert.equal(output.kept[0].lastFailureRun, 'run-03');
   assert.match(output.kept[0].reason, /failed in run-03/);
+});
+
+test('the checked-in example documents the quarantine review loop', (t) => {
+  const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const exampleRuns = path.join(repoRoot, 'examples', 'runs');
+  const { root, runs } = fixture(t);
+  cpSync(exampleRuns, runs, { recursive: true });
+  const quarantine = path.join(root, 'quarantine.txt');
+
+  const written = runCli(['scan', runs, '--quarantine', quarantine]);
+  assert.equal(written.status, 0, written.stderr);
+  assert.equal(
+    readFileSync(quarantine, 'utf8'),
+    [
+      'com.example.LoginTest::rejectsExpiredToken',
+      'com.example.SearchTest::filtersByPrice',
+      'com.example.CheckoutTest::appliesCoupon',
+      '',
+    ].join('\n'),
+  );
+
+  for (let run = 6; run <= 8; run += 1) {
+    writeFile(runs, `run-0${run}/results.xml`, exampleGreenRun(run));
+  }
+
+  const result = runCli(['review', quarantine, runs]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stdout,
+    [
+      'release com.example.CheckoutTest::appliesCoupon (stable for 5 runs; last failure: run-03)',
+      'keep com.example.LoginTest::rejectsExpiredToken (stable for 4 of 5 runs; failed in run-04)',
+      'keep com.example.SearchTest::filtersByPrice (stable for 3 of 5 runs; failed in run-05)',
+      '',
+    ].join('\n'),
+  );
+
+  const output = reviewJson(quarantine, runs);
+  assert.equal(output.stableFor, 5);
+  assert.equal(output.runsObserved, 8);
+  assert.deepEqual(output.summary, { released: 1, kept: 2, unknown: 0 });
+  assert.deepEqual(output.released, [
+    {
+      id: 'com.example.CheckoutTest::appliesCoupon',
+      stableFor: 5,
+      lastFailureRun: 'run-03',
+      reason: 'no failure in the newest 5 runs',
+    },
+  ]);
+  assert.deepEqual(
+    output.kept.map((item) => [item.id, item.stableFor, item.lastFailureRun, item.reason]),
+    [
+      [
+        'com.example.LoginTest::rejectsExpiredToken',
+        4,
+        'run-04',
+        'failed in run-04',
+      ],
+      [
+        'com.example.SearchTest::filtersByPrice',
+        3,
+        'run-05',
+        'failed in run-05',
+      ],
+    ],
+  );
+  assert.deepEqual(output.unknown, []);
+  assert.deepEqual(output.results, [...output.released, ...output.kept]);
+  assert.deepEqual(output.tests, output.results);
+  assert.deepEqual(output.warnings, []);
+
+  const relaxed = reviewJson(quarantine, runs, ['--stable-for', '3']);
+  assert.deepEqual(
+    relaxed.released.map((item) => [item.id, item.stableFor, item.lastFailureRun]),
+    [
+      ['com.example.LoginTest::rejectsExpiredToken', 4, 'run-04'],
+      ['com.example.SearchTest::filtersByPrice', 3, 'run-05'],
+      ['com.example.CheckoutTest::appliesCoupon', 5, 'run-03'],
+    ],
+  );
+  assert.deepEqual(relaxed.kept, []);
+  assert.equal(relaxed.stableFor, 3);
 });
 
 test('review refuses an unreadable quarantine file with a clear exit code', (t) => {

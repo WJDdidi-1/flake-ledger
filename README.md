@@ -346,11 +346,12 @@ percentage (`50`), or `new`. A rate gates every flaky classification; `new`
 gates only rows whose `trend` is `new`. `--min-runs` applies to both forms.
 Exit codes:
 
-- `0` — report written, or no test matched `--fail-on`.
+- `0` — report written, no test matched `--fail-on`, or `review` completed
+  (released, kept, and unknown ids all exit 0).
 - `1` — a flaky test crossed the rate, a new flake matched `--fail-on new`, or
   `explain` matched no test or more than one test.
-- `2` — usage error, unreadable runs directory, or a quarantine file that
-  could not be written.
+- `2` — usage error, unreadable runs directory, a quarantine file that could
+  not be written, or a quarantine file that could not be read.
 
 ### Scan options
 
@@ -365,6 +366,101 @@ Exit codes:
 | `--new-window <n>` | Number of newest runs in which a current unstable period must start to count as `new` (default: 2). |
 | `--group-by <mode>` | `auto` (default), `file`, `parent`, or `run`; controls what counts as one run. |
 | `--run-id <id>` | Label the one run and imply `--group-by run`; useful for a single `gh run download` tree. |
+
+### Review a quarantine file
+
+`--quarantine` only writes ids. It does not record what happens to them later,
+so a quarantined test can stay in the file after weeks of green runs. `review`
+reads the file back and joins each id to a later scan:
+
+```sh
+flake-ledger review flaky.txt path/to/runs
+flake-ledger review flaky.txt path/to/runs --stable-for 3
+flake-ledger review flaky.txt path/to/runs --json
+```
+
+For each id, `review` walks the observed runs from newest to oldest and counts
+the consecutive runs where the test actually ran and passed without retry
+evidence. A failure, an error, a passed-on-retry or failed-on-retry outcome,
+a skip, or a missing observation stops the streak: absence is not evidence of
+stability. An id is released when that streak reaches `--stable-for` (default
+5); otherwise it is kept with the run that blocked it. Ids that no longer
+appear in any scanned run are reported as `unknown`.
+
+The checked-in five-run example contains three flaky tests. Copy it, write the
+quarantine file, then add three all-green runs (`run-06` through `run-08`) to
+simulate the fix settling. The full reproduction is in
+[`docs/validation/quarantine-review-clean-install.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/validation/quarantine-review-clean-install.md);
+on that eight-run fixture `review` prints:
+
+```console
+$ flake-ledger review flaky.txt runs
+release com.example.CheckoutTest::appliesCoupon (stable for 5 runs; last failure: run-03)
+keep com.example.LoginTest::rejectsExpiredToken (stable for 4 of 5 runs; failed in run-04)
+keep com.example.SearchTest::filtersByPrice (stable for 3 of 5 runs; failed in run-05)
+```
+
+`appliesCoupon` is safe to unquarantine: its last unstable outcome was the
+retried pass in `run-03`, and `run-04` through `run-08` are five clean
+observations. The other two are still short of five, so they stay. Lower the
+bar when the team agrees fewer clean runs are enough:
+
+```console
+$ flake-ledger review flaky.txt runs --stable-for 3
+release com.example.LoginTest::rejectsExpiredToken (stable for 4 runs; last failure: run-04)
+release com.example.SearchTest::filtersByPrice (stable for 3 runs; last failure: run-05)
+release com.example.CheckoutTest::appliesCoupon (stable for 5 runs; last failure: run-03)
+```
+
+`review` is report-only: it never rewrites `flaky.txt`, and every outcome
+(released, kept, or unknown) exits 0. Remove the released ids from the
+quarantine file yourself, or keep the file as a record and consult its review
+output before re-running the CI job. A missing or unreadable quarantine file
+exits 2.
+
+The JSON has one entry per verdict (`id`, `stableFor`, `lastFailureRun`,
+`reason`) plus the counts needed to automate the decision:
+
+```json
+{
+  "tool": "flake-ledger",
+  "version": "0.5.0",
+  "quarantineFile": "flaky.txt",
+  "runsDir": "/path/to/runs",
+  "stableFor": 5,
+  "runsObserved": 8,
+  "summary": {"released": 1, "kept": 2, "unknown": 0},
+  "released": [
+    {
+      "id": "com.example.CheckoutTest::appliesCoupon",
+      "stableFor": 5,
+      "lastFailureRun": "run-03",
+      "reason": "no failure in the newest 5 runs"
+    }
+  ],
+  "kept": [
+    {
+      "id": "com.example.LoginTest::rejectsExpiredToken",
+      "stableFor": 4,
+      "lastFailureRun": "run-04",
+      "reason": "failed in run-04"
+    },
+    {
+      "id": "com.example.SearchTest::filtersByPrice",
+      "stableFor": 3,
+      "lastFailureRun": "run-05",
+      "reason": "failed in run-05"
+    }
+  ],
+  "unknown": [],
+  "warnings": []
+}
+```
+
+The raw output also repeats the same entries under `results` and `tests` for
+compatibility with consumers that expect one flat list; both aliases contain
+`released` followed by `kept` and `unknown`. Use `summary` when you only need
+the counts.
 
 ## Input layout
 
@@ -562,7 +658,15 @@ the single-artifact case, are in
 
 The command fails only when a flaky classification crosses the threshold. Keep
 the `flaky.txt` artifact or commit it if your test runner supports reading a
-quarantine list. To fail on regressions only, swap the gate for
+quarantine list. When a fix has had time to settle, feed the same file back to
+`review` before deleting ids; it counts consecutive clean runs and says which
+ones can come back:
+
+```sh
+flake-ledger review flaky.txt runs --stable-for 5
+```
+
+To fail on regressions only, swap the gate for
 `--fail-on new`: chronic flakes and tests that recovered or did not run in the
 newest run will not fail the build. Run both gates if a chronic flake should
 still block CI while a separate job flags what broke today.
@@ -597,9 +701,9 @@ No. `flake-ledger` reads JUnit XML that your test runner already produced; it
 does not execute tests, change retry settings, or modify reports.
 
 **Does it upload my reports anywhere?**
-No. `scan` and `explain` read local XML and write to stdout, `--json`, or the
-`--quarantine` file you name. There are no network calls and no runtime
-dependencies.
+No. `scan`, `explain`, and `review` read local XML and the named quarantine
+file and write to stdout, `--json`, or the `--quarantine` file you name. There
+are no network calls and no runtime dependencies.
 
 **How do I fail CI only on well-evidenced flakes?**
 Combine both thresholds:
@@ -642,10 +746,11 @@ the report-path fallback when it does not, one per new flake, none for chronic
 rows, and escaping of workflow-command delimiters), `--top`, `--quarantine`,
 `explain`, `new`/`chronic` trends on a scripted five-run timeline, the
 `--new-window` boundary, inactive tests, `--fail-on` (rate and `new`) with
-`--min-runs`, and the per-run unstable counts/rates plus worsening, improving,
-and flat suite directions. One regression test runs the CLI against the
-checked-in five-run fixture and asserts the summary line and JSON fields shown
-above.
+`--min-runs`, the per-run unstable counts/rates plus worsening, improving, and
+flat suite directions, and `review` (release, keep, unknown, and the
+`--stable-for` boundary). Regression tests run the CLI against the checked-in
+five-run fixture and assert the suite summary, JSON fields, and
+quarantine-review lines shown above.
 
 The same new/chronic timeline is reproduced with plain shell and JUnit XML in
 [`docs/trend-timeline.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/trend-timeline.md),
@@ -663,6 +768,13 @@ The checked-in fixture under [`examples/runs`](examples/runs) is a second,
 readable path through the same CLI: `npm run example` runs `scan`, `explain`,
 `--quarantine`, and the CI gate against it, and exits nonzero if the table,
 timeline, quarantine list, or exit codes change.
+
+The quarantine-review loop also has a clean-install record in
+[`docs/validation/quarantine-review-clean-install.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/validation/quarantine-review-clean-install.md):
+a local `npm pack` tarball is installed into an empty directory, the installed
+binary writes a quarantine file from the checked-in example, three all-green
+runs are appended, and `review` reproduces the release/keep lines and JSON
+shown above. The page includes the full fixture generator and the raw JSON.
 
 The suite trend also has a clean-install record in
 [`docs/validation/suite-trend-clean-install.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/validation/suite-trend-clean-install.md):
