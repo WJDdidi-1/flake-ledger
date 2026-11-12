@@ -236,11 +236,11 @@ flake-ledger --version
 ```
 
 The npm package is published by the release workflow when a `v*` tag is
-pushed. The latest release is `v0.6.1`:
+pushed. The latest release is `v0.7.0`:
 
 ```sh
-npm install --global flake-ledger@0.6.1
-flake-ledger --version   # 0.6.1
+npm install --global flake-ledger@0.7.0
+flake-ledger --version   # 0.7.0
 ```
 
 To try it without a global install, run the checked-in five-run example:
@@ -365,7 +365,7 @@ is the part of the output CI gates can pin:
 {
   "schemaVersion": 1,
   "tool": "flake-ledger",
-  "version": "0.6.1"
+  "version": "0.7.0"
 }
 ```
 
@@ -467,7 +467,7 @@ The JSON has one entry per verdict (`id`, `stableFor`, `lastFailureRun`,
 ```json
 {
   "tool": "flake-ledger",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "quarantineFile": "flaky.txt",
   "runsDir": "/path/to/runs",
   "stableFor": 5,
@@ -857,7 +857,7 @@ Versions are SemVer tags (`vMAJOR.MINOR.PATCH`) and must match `version` in
 `package.json`. Pushing a `v*` tag runs the publish workflow, which tests,
 packs the tarball, installs it into a clean directory, and publishes it to npm
 with provenance only after every CI check on the tagged commit is green. The
-latest release is `v0.6.1`, matching `version` `0.6.1` in `package.json`.
+latest release is `v0.7.0`, matching `version` `0.7.0` in `package.json`.
 
 The changelog for each version lives in [`CHANGELOG.md`](CHANGELOG.md), the
 per-release GitHub Release bodies are in
