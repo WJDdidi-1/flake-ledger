@@ -236,11 +236,11 @@ flake-ledger --version
 ```
 
 The npm package is published by the release workflow when a `v*` tag is
-pushed. The latest release is `v0.6.0`:
+pushed. The latest release is `v0.6.1`:
 
 ```sh
-npm install --global flake-ledger@0.6.0
-flake-ledger --version   # 0.6.0
+npm install --global flake-ledger@0.6.1
+flake-ledger --version   # 0.6.1
 ```
 
 To try it without a global install, run the checked-in five-run example:
@@ -301,11 +301,13 @@ $ flake-ledger scan runs --format github
 ```
 
 When the XML carries `file`/`line`, the source file is what GitHub shows; the
-JUnit XML path is used only when no source location is available. Source
-locations are made relative to the working directory when they are absolute, and
-`line` is omitted when the XML gives no usable line. Reporters that do not emit
-a source location keep the JUnit XML path, so the annotation remains present
-even when it can only point at the artifact.
+JUnit XML path is used only when no source location is available. An absolute
+source path inside the checkout is rewritten relative to the working directory,
+and `line` is omitted when the XML gives no usable line. A source path outside
+the checkout (including a Windows drive path recorded on another runner) cannot
+be attached, so the annotation falls back to the relative JUnit XML path.
+Reporters that do not emit a source location keep the JUnit XML path, so the
+annotation remains present even when it can only point at the artifact.
 
 GitHub decodes `%25` back to `%` when rendering the warning. Chronic, recovered,
 inactive, and stable tests produce no annotation, and if there is no new flake
@@ -424,7 +426,7 @@ The JSON has one entry per verdict (`id`, `stableFor`, `lastFailureRun`,
 ```json
 {
   "tool": "flake-ledger",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "quarantineFile": "flaky.txt",
   "runsDir": "/path/to/runs",
   "stableFor": 5,
@@ -813,7 +815,7 @@ Versions are SemVer tags (`vMAJOR.MINOR.PATCH`) and must match `version` in
 `package.json`. Pushing a `v*` tag runs the publish workflow, which tests,
 packs the tarball, installs it into a clean directory, and publishes it to npm
 with provenance only after every CI check on the tagged commit is green. The
-latest release is `v0.6.0`, matching `version` `0.6.0` in `package.json`.
+latest release is `v0.6.1`, matching `version` `0.6.1` in `package.json`.
 
 The changelog for each version lives in [`CHANGELOG.md`](CHANGELOG.md), the
 per-release GitHub Release bodies are in
