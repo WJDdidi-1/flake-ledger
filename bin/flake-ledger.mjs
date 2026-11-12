@@ -15,6 +15,7 @@ import {
   formatExplain,
   formatGithubAnnotations,
   formatTable,
+  JSON_SCHEMA_VERSION,
   toJson,
 } from '../lib/report.mjs';
 
@@ -502,6 +503,7 @@ function runExplain(options) {
     process.stdout.write(
       `${JSON.stringify(
         {
+          schemaVersion: JSON_SCHEMA_VERSION,
           tool: 'flake-ledger',
           version: VERSION,
           runsDir: result.runsDir,
