@@ -54,6 +54,14 @@ jobs:
           npm install --no-audit --no-fund ../dist/*.tgz
           node node_modules/flake-ledger/bin/flake-ledger.mjs --version
           node node_modules/flake-ledger/bin/flake-ledger.mjs --help > /dev/null
+      - name: every CI job on this commit must be green
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: node scripts/publish-ci-gate.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: tarball
