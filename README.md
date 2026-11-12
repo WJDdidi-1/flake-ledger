@@ -377,6 +377,25 @@ only the `tests` array, so the totals and the schema version still describe the
 whole scan. Both commands import the same version constant from the runtime, so
 they cannot drift from each other.
 
+The documented keys are part of the contract. A key can be `null`, but it is
+always present; `warnings[].runId` is the only optional key.
+
+| Payload | Keys |
+| --- | --- |
+| `scan` top level | `schemaVersion`, `tool`, `version`, `runsDir`, `totals`, `runs`, `tests`, `warnings`, `suite` |
+| `explain` top level | `schemaVersion`, `tool`, `version`, `runsDir`, `test`, `warnings` |
+| `totals` | `files`, `runs`, `tests`, `attempts` |
+| `runs[]` | `id`, `path`, `startedAt`, `files`, `fileCount`, `testCount`, `attemptCount`, `unstableTests`, `flakyRate`, `newFlakes` |
+| `tests[]` and `explain.test` | `id`, `classname`, `name`, `runs`, `attempts`, `passedAttempts`, `failedAttempts`, `errorAttempts`, `skippedAttempts`, `passedRuns`, `failedRuns`, `errorRuns`, `skippedRuns`, `passedOnRetryRuns`, `failedOnRetryRuns`, `unstableRuns`, `eligibleRuns`, `unstableRate`, `score`, `classification`, `trend`, `trendSince`, `timeline`, `runIds` |
+| `timeline[]` | `runId`, `runPath`, `id`, `classname`, `name`, `outcome`, `status`, `attemptCount`, `attempts` |
+| `timeline[].attempts[]` | `classname`, `name`, `id`, `status`, `message`, `type`, `details`, `time`, `retried`, `file`, `line`, `source`, `suite`, `suiteKey` |
+| `suite` | `trend`, `firstWindowRate`, `lastWindowRate` |
+| `warnings[]` | `file`, `message`, and `runId` when the warning belongs to a run |
+
+`test/json-contract.test.mjs` asserts this list against `scan --json` and
+`explain --json`, so removing or renaming any of these keys fails `npm test`.
+Adding a key does not fail that test and does not require a schema version bump.
+
 ### Scan options
 
 | Option | Meaning |
