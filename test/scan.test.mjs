@@ -800,7 +800,7 @@ test('scan marks new flakes apart from chronic ones in JSON, the table, and expl
 });
 
 test('scan --format github emits one warning per new flake and keeps --json unchanged', (t) => {
-  const { runs } = fixture(t);
+  const { root, runs } = fixture(t);
   for (let run = 1; run <= 5; run += 1) {
     const body = [
       testcase('pkg.TrendTest', 'newlyFlaky', run >= 4 ? '<failure message="broke today"/>' : ''),
@@ -810,24 +810,22 @@ test('scan --format github emits one warning per new flake and keeps --json unch
     writeFile(runs, `run-0${run}/results.xml`, junit(body.join('\n')));
   }
 
-  const output = runCli(['scan', runs, '--format', 'github']);
+  const output = runCli(['scan', runs, '--format', 'github'], { cwd: root });
   assert.equal(output.status, 0, output.stderr);
   const annotations = output.stdout
     .split('\n')
     .filter((line) => line.startsWith('::warning '));
   assert.equal(annotations.length, 1, output.stdout);
   const annotation = annotations[0];
-  assert.match(annotation, /^::warning file=/);
+  assert.match(annotation, /^::warning file=runs\/run-05\/results\.xml,/);
   assert.match(annotation, /pkg\.TrendTest::newlyFlaky/);
-  assert.ok(
-    annotation.includes(path.join(runs, 'run-05', 'results.xml').split(path.sep).join('/')),
-    `expected the newest report path in: ${annotation}`,
-  );
+  assert.doesNotMatch(annotation, /%3A/);
+  assert.doesNotMatch(annotation, /file=(?:\/|[A-Za-z]:)/);
   assert.doesNotMatch(annotation, /pkg\.TrendTest::chronic/);
   assert.doesNotMatch(annotation, /pkg\.TrendTest::stable/);
   assert.doesNotMatch(output.stdout, /TEST ID/);
 
-  const equalsForm = runCli(['scan', runs, '--format=github']);
+  const equalsForm = runCli(['scan', runs, '--format=github'], { cwd: root });
   assert.equal(equalsForm.status, 0, equalsForm.stderr);
   assert.equal(equalsForm.stdout, output.stdout);
 
@@ -888,6 +886,62 @@ test('scan --format github points a new flake at the test source file and line',
   assert.equal(newestAttempt.line, 42);
   // The report path is still recorded separately from the source location.
   assert.equal(newestAttempt.source, path.join(runs, 'run-05', 'results.xml'));
+});
+
+test('scan --format github rewrites absolute source paths inside the checkout and falls back when outside it', (t) => {
+  const { root, runs } = fixture(t);
+  const insideSource = path.join(root, 'test', 'login.test.ts');
+  const outsideSource = path.join(path.dirname(root), 'outside-checkout', 'test', 'outside.test.ts');
+  for (let run = 1; run <= 5; run += 1) {
+    const failing = run >= 4 ? '<failure message="broke today"/>' : '';
+    writeFile(
+      runs,
+      `run-0${run}/results.xml`,
+      junit(
+        [
+          `<testcase classname="pkg.AbsoluteSourceTest" name="newFlake" file="${insideSource}" line="42">${failing}</testcase>`,
+          `<testcase classname="pkg.OutsideSourceTest" name="newFlake" file="${outsideSource}" line="9">${failing}</testcase>`,
+          `<testcase classname="pkg.ForeignSourceTest" name="newFlake" file="C:\\checkout\\test\\foreign.test.ts" line="9">${failing}</testcase>`,
+        ].join('\n'),
+      ),
+    );
+  }
+
+  const output = runCli(['scan', runs, '--format', 'github'], { cwd: root });
+  assert.equal(output.status, 0, output.stderr);
+  const annotations = output.stdout
+    .split('\n')
+    .filter((line) => line.startsWith('::warning '));
+  assert.equal(annotations.length, 3, output.stdout);
+
+  const insideAnnotation = annotations.find((line) => line.includes('pkg.AbsoluteSourceTest'));
+  assert.ok(insideAnnotation, output.stdout);
+  assert.match(
+    insideAnnotation,
+    /^::warning file=test\/login\.test\.ts,line=42,title=flake-ledger new flake::/,
+  );
+
+  // A JUnit file outside the checkout is not attachable, so the report inside
+  // the checkout is the fallback and the unusable line is dropped.
+  const outsideAnnotation = annotations.find((line) => line.includes('pkg.OutsideSourceTest'));
+  assert.ok(outsideAnnotation, output.stdout);
+  assert.match(
+    outsideAnnotation,
+    /^::warning file=runs\/run-05\/results\.xml,title=flake-ledger new flake::/,
+  );
+
+  // A report made on Windows can carry a drive path even when this scan runs
+  // on another platform; it is not a path inside this checkout either.
+  const foreignAnnotation = annotations.find((line) => line.includes('pkg.ForeignSourceTest'));
+  assert.ok(foreignAnnotation, output.stdout);
+  assert.match(
+    foreignAnnotation,
+    /^::warning file=runs\/run-05\/results\.xml,title=flake-ledger new flake::/,
+  );
+
+  // No absolute path (or its percent-encoded Windows drive) leaks through.
+  assert.doesNotMatch(output.stdout, /%3A/);
+  assert.doesNotMatch(output.stdout, /file=(?:\/|[A-Za-z]:)/);
 });
 
 test('scan --format github emits a source file without a line and reads a failure-child location', (t) => {
@@ -1002,7 +1056,7 @@ test('scan --format github takes a suite file with a testcase line', (t) => {
 });
 
 test('scan --format github emits the exact warning command for a new flake only', (t) => {
-  const { runs } = fixture(t);
+  const { root, runs } = fixture(t);
   for (let run = 1; run <= 5; run += 1) {
     const body = [
       testcase('pkg.AnnotationTest', 'newFlake', run >= 4 ? '<failure message="broke today"/>' : ''),
@@ -1011,19 +1065,19 @@ test('scan --format github emits the exact warning command for a new flake only'
     writeFile(runs, `run-0${run}/results.xml`, junit(body.join('\n')));
   }
 
-  const reportFile = path.join(runs, 'run-05', 'results.xml').split(path.sep).join('/');
+  const reportFile = 'runs/run-05/results.xml';
   const expected =
     `::warning file=${reportFile},title=flake-ledger new flake::` +
     'pkg.AnnotationTest::newFlake is a new flake: unstable since run-04 (2/5 runs, 40.0%25).';
 
-  const annotated = runCli(['scan', runs, '--format', 'github']);
+  const annotated = runCli(['scan', runs, '--format', 'github'], { cwd: root });
   assert.equal(annotated.status, 0, annotated.stderr);
   assert.equal(annotated.stdout, `${expected}\n`);
   assert.doesNotMatch(annotated.stdout, /pkg\.AnnotationTest::chronic/);
 
   // Annotations alone are report-only; the separate new-only gate is what
   // makes the job fail while keeping the annotation on the pull request.
-  const gated = runCli(['scan', runs, '--format', 'github', '--fail-on', 'new']);
+  const gated = runCli(['scan', runs, '--format', 'github', '--fail-on', 'new'], { cwd: root });
   assert.equal(gated.status, 1, gated.stderr);
   assert.equal(gated.stdout, `${expected}\n`);
   assert.match(gated.stderr, /1 new flake matched --fail-on new/);
@@ -1031,7 +1085,7 @@ test('scan --format github emits the exact warning command for a new flake only'
 });
 
 test('scan --format github escapes workflow command data and properties', (t) => {
-  const { runs } = fixture(t);
+  const { root, runs } = fixture(t);
   // A comma and a percent in the report path exercise property escaping; a
   // newline and a percent in the test id exercise data escaping. Without
   // escaping, the newline would start a second workflow command.
@@ -1043,14 +1097,16 @@ test('scan --format github escapes workflow command data and properties', (t) =>
     );
   }
 
-  const output = runCli(['scan', runs, '--format', 'github']);
+  const output = runCli(['scan', runs, '--format', 'github'], { cwd: root });
   assert.equal(output.status, 0, output.stderr);
   const annotation = output.stdout.trimEnd();
   assert.equal(annotation.split('\n').length, 1, output.stdout);
   assert.match(
     annotation,
-    /^::warning file=.*100%25%2Cresults\/results\.xml,title=flake-ledger new flake::/,
+    /^::warning file=runs\/run-05\/100%25%2Cresults\/results\.xml,title=flake-ledger new flake::/,
   );
+  assert.doesNotMatch(annotation, /%3A/);
+  assert.doesNotMatch(annotation, /file=(?:\/|[A-Za-z]:)/);
   assert.match(annotation, /::pkg\.Weird,Test:100%25::new%0Aflake is a new flake:/);
   assert.doesNotMatch(annotation, /\n/);
 });
