@@ -320,7 +320,8 @@ flake-ledger scan runs --format github --fail-on new
 
 The exact output, a scripted reproduction, and the escaping rules are in
 [`docs/ci-annotations.md`](https://github.com/WJDdidi-1/flake-ledger/blob/main/docs/ci-annotations.md).
-`--format json` is equivalent to `--json`; the JSON schema is unchanged.
+`--format json` is equivalent to `--json`; both emit the versioned contract
+described under [JSON contract](#json-contract).
 
 Explain one test's per-run timeline, including XML paths and failure messages:
 
@@ -354,6 +355,27 @@ Exit codes:
   `explain` matched no test or more than one test.
 - `2` — usage error, unreadable runs directory, a quarantine file that could
   not be written, or a quarantine file that could not be read.
+
+### JSON contract
+
+`scan --json` and `explain --json` start with `schemaVersion: 1`. That integer
+is the part of the output CI gates can pin:
+
+```json
+{
+  "schemaVersion": 1,
+  "tool": "flake-ledger",
+  "version": "0.6.1"
+}
+```
+
+The version changes only when a field is renamed, removed, or changes meaning or
+type; adding a field keeps the same version. Read `schemaVersion` before using
+the rest of the payload, and fail with a clear message if it is newer than the
+gate understands instead of silently misreading a renamed field. `--top` limits
+only the `tests` array, so the totals and the schema version still describe the
+whole scan. Both commands import the same version constant from the runtime, so
+they cannot drift from each other.
 
 ### Scan options
 
@@ -622,8 +644,9 @@ option only controls whether an individual test is `new` or `chronic`.
 `newFlakes` is a separate "what started here" counter and does not feed the
 suite direction.
 
-The JSON output contains `totals`, `runs`, `warnings`, `suite`, and one `tests`
-record per test (limited to the first N by `--top`) with its `attempts`,
+The JSON output starts with `schemaVersion: 1` and contains `totals`, `runs`,
+`warnings`, `suite`, and one `tests` record per test (limited to the first N by
+`--top`) with its `attempts`,
 `unstableRuns`, `eligibleRuns`, `unstableRate`, Wilson `score`,
 `classification`, `trend`, `trendSince` (the run where the current unstable
 period began, or `null`), and `timeline`.

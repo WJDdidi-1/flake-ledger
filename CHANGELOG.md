@@ -6,6 +6,15 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
 
 ## [Unreleased]
 
+### Added
+
+- `scan --json` and `explain --json` now begin with `schemaVersion: 1`, so a CI
+  gate can pin the machine-readable contract instead of failing silently when a
+  field is renamed. Both outputs read the version from one shared constant, and
+  the README documents the contract and the existing exit codes (`0`, `1`, and
+  `2`). Adding fields does not bump the version; renaming, removing, or
+  retyping one does.
+
 ## [0.6.1] - 2026-11-12
 
 ### Fixed
