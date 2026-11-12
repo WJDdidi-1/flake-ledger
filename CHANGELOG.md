@@ -6,8 +6,19 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-12
+
 ### Fixed
 
+- `scan --format github` now emits annotation paths a runner can attach, on
+  Windows as well as POSIX. An absolute source path inside the checkout is
+  rewritten relative to the working directory in POSIX form (including through
+  a symlinked temporary directory), a source path outside the checkout falls
+  back to the newest JUnit XML report, and a Windows drive path seen on a POSIX
+  runner no longer leaks a percent-encoded `C%3A` into the annotation. The
+  JUnit XML fallback is relative to the working directory too, so a downloaded
+  artifact path cannot be emitted as an absolute path. The test suite covers
+  inside, outside, and foreign-drive source paths.
 - The publish gate now asks for `actions: read`, so a check cancelled before a
   runner was assigned can be told apart from a test failure instead of always
   blocking. It also ignores check runs from earlier publish attempts, so a
