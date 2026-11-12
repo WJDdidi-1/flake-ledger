@@ -812,8 +812,8 @@ node bin/flake-ledger.mjs scan path/to/runs
 Versions are SemVer tags (`vMAJOR.MINOR.PATCH`) and must match `version` in
 `package.json`. Pushing a `v*` tag runs the publish workflow, which tests,
 packs the tarball, installs it into a clean directory, and publishes it to npm
-with provenance. The latest release is `v0.6.0`, matching `version` `0.6.0` in
-`package.json`.
+with provenance only after every CI check on the tagged commit is green. The
+latest release is `v0.6.0`, matching `version` `0.6.0` in `package.json`.
 
 The changelog for each version lives in [`CHANGELOG.md`](CHANGELOG.md), the
 per-release GitHub Release bodies are in

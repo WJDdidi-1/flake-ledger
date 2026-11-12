@@ -10,14 +10,28 @@
 //   - any check failed / timed out               -> refuse
 //   - any check cancelled after its job started  -> refuse
 //   - cancelled with no runner ever acquired     -> warn (GitHub capacity)
-// A skipped check is a deliberate matrix decision, not a failure.
+// A skipped check is a deliberate matrix decision, not a failure. Check runs
+// from the publish workflow itself are not evidence about the code: they are
+// excluded, including a failed gate from an earlier attempt at the same tag.
 import process from 'node:process';
 
 const REPO = process.env.GITHUB_REPOSITORY;
 const SHA = process.env.GITHUB_SHA;
 const SELF = String(process.env.GITHUB_RUN_ID ?? '');
 const TOKEN = process.env.GH_TOKEN;
-const API = 'https://api.github.com';
+// GitHub Actions exports GITHUB_API_URL (api.github.com on github.com, the
+// appliance URL on GHES). Tests point it at a local server.
+const API = process.env.GITHUB_API_URL || 'https://api.github.com';
+// GITHUB_WORKFLOW_REF is owner/repo/.github/workflows/publish.yml@refs/...;
+// the API reports only the path part.
+const WORKFLOW_PATH = workflowPath(process.env.GITHUB_WORKFLOW_REF);
+const runPaths = new Map();
+
+function workflowPath(ref) {
+  if (!ref) return null;
+  const path = String(ref).split('@')[0].split('/').slice(2).join('/');
+  return path === '' ? null : path.replace(/^\/+/u, '');
+}
 
 const FAILING = new Set(['failure', 'timed_out', 'action_required', 'startup_failure', 'stale']);
 const PASSING = new Set(['success', 'neutral', 'skipped']);
@@ -37,6 +51,23 @@ async function api(path) {
 function runIdOf(run) {
   const match = /\/actions\/runs\/(\d+)/u.exec(String(run.html_url ?? run.details_url ?? ''));
   return match === null ? null : match[1];
+}
+
+async function publishRun(run) {
+  if (WORKFLOW_PATH === null) return false;
+  const id = runIdOf(run);
+  if (id === null) return false;
+  if (!runPaths.has(id)) {
+    try {
+      const data = await api(`/repos/${REPO}/actions/runs/${id}`);
+      const found = typeof data.path === 'string' ? data.path.replace(/^\/+/u, '') : null;
+      runPaths.set(id, found);
+    } catch {
+      // An unreadable run is not evidence that it is ours; judge it normally.
+      runPaths.set(id, null);
+    }
+  }
+  return runPaths.get(id) === WORKFLOW_PATH;
 }
 
 async function capacityCancelled(run) {
@@ -60,7 +91,12 @@ for (let page = 1; page <= 20; page += 1) {
   if (runs.length >= (data.total_count ?? 0) || (data.check_runs ?? []).length === 0) break;
 }
 
-const foreign = runs.filter((run) => SELF === '' || runIdOf(run) !== SELF);
+const foreign = [];
+for (const run of runs) {
+  if (SELF !== '' && runIdOf(run) === SELF) continue;
+  if (await publishRun(run)) continue;
+  foreign.push(run);
+}
 if (foreign.length === 0) {
   console.error(`publish gate: no check run has looked at ${SHA}; refusing to publish`);
   process.exit(1);

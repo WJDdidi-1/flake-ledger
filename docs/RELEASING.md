@@ -35,6 +35,25 @@ npmjs.com for `flake-ledger` that names:
 The GitHub repository also needs an `npm-publish` environment (Settings →
 Environments) and push access to `main` and tags.
 
+## The CI gate on a tag
+
+Before the tarball is uploaded, the verify job asks GitHub for every check run
+attached to the tagged commit. It refuses to publish when:
+
+- no check run has looked at the commit at all (a tag on an untested commit);
+- any check is still queued or in progress (there is no verdict yet);
+- any check failed, timed out, or was cancelled after its job started.
+
+A cancelled check whose job never acquired a runner is GitHub capacity, not a
+test failure: it is reported as a warning and does not block the release. A
+skipped check is a deliberate matrix decision and passes. The publish job only
+starts after this gate passes, so `npm publish` cannot run from a commit with a
+red matrix.
+
+If the gate says "still being checked", wait for CI on that commit to finish
+and re-run the failed publish workflow (`gh run rerun <run-id>`). Do not move
+the tag; the gate will look at the new run for the same commit.
+
 ## Release checklist
 
 Run these from a clean checkout of `main`:
@@ -71,8 +90,9 @@ git push origin v0.1.0
 ## What happens next
 
 1. The `publish` workflow checks that `v0.1.0` matches `package.json`, runs the
-   tests, packs the tarball, installs it in a clean directory, and publishes it
-   with provenance.
+   tests, packs the tarball, installs it in a clean directory, verifies that
+   every CI check on the tagged commit is green, and publishes it with
+   provenance.
 2. It waits for the registry to serve the new version and checks that
    `npm view flake-ledger version` reports it.
 3. A tag alone appears under the repository's **Tags**, not **Releases**. Create

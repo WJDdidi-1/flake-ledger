@@ -4,6 +4,17 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/), and each released version is a
 `v*` tag that matches the `version` in `package.json`.
 
+## [Unreleased]
+
+### Fixed
+
+- The publish gate now asks for `actions: read`, so a check cancelled before a
+  runner was assigned can be told apart from a test failure instead of always
+  blocking. It also ignores check runs from earlier publish attempts, so a
+  retried tag is judged on its CI checks rather than on a stale gate failure.
+  Deterministic tests cover green, failed, pending, missing, cancelled, and
+  retried-attempt cases.
+
 ## [0.6.0] - 2026-11-12
 
 ### Added
