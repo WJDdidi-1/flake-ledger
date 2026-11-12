@@ -6,6 +6,8 @@ All notable changes to `flake-ledger` are recorded here. Versions follow
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-12
+
 ### Added
 
 - `scan --json` and `explain --json` now begin with `schemaVersion: 1`, so a CI
